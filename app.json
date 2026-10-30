@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Hellocat",
+    "slug": "hellocat-app",
+    "version": "1.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#212836"
+    },
+    "android": {
+      "package": "com.hellocat.app",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#212836"
+      },
+      "permissions": [
+        "INTERNET",
+        "POST_NOTIFICATIONS",
+        "VIBRATE",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "AUDIO_SETTINGS",
+        "MODIFY_AUDIO_SETTINGS",
+        "BLUETOOTH",
+        "BLUETOOTH_CONNECT"
+      ]
+    },
+    "plugins": [
+      "@config-plugins/react-native-webrtc",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "HelloCat needs access to your photos so you can share them in chats and posts."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#5d8ffc"
+        }
+      ]
+    ]
+  }
+}

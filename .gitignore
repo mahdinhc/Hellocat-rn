@@ -1,0 +1,13 @@
+node_modules/
+.expo/
+dist/
+web-build/
+android/
+ios/
+*.apk
+*.aab
+.DS_Store
+
+# Service credentials
+google-services.json
+*firebase-adminsdk*.json
