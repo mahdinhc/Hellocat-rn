@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { FlatList, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ref, onValue, get } from 'firebase/database';
+import { ref, get } from 'firebase/database';
 import { db } from '../firebase';
+import { safeRef, safeOnValue, normalizeUser } from '../safe';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText, Avatar, Row, Input, Empty, Loading, Button } from '../components/ui';
@@ -14,7 +15,11 @@ function UserRow({ uid: fid, data, navigation, right }) {
   const fetched = useUser(data ? null : fid);
   const user = data || fetched;
   const [online, setOnline] = useState(false);
-  useEffect(() => onValue(ref(db, 'status/' + fid + '/state'), (s) => setOnline(s.val() === 'online')), [fid]);
+  useEffect(() => {
+    const r = safeRef('status', fid, 'state');
+    if (!r) return undefined;
+    return safeOnValue(r, (s) => setOnline(s.val() === 'online'));
+  }, [fid]);
   return (
     <TouchableOpacity onPress={() => navigation.navigate('Profile', { uid: fid })} activeOpacity={0.7}>
       <Row style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
@@ -31,7 +36,11 @@ function UserRow({ uid: fid, data, navigation, right }) {
 
 function useKeys(path) {
   const [keys, setKeys] = useState(null);
-  useEffect(() => onValue(ref(db, path), (s) => setKeys(s.exists() ? Object.keys(s.val()) : [])), [path]);
+  useEffect(() => {
+    const r = safeRef(path);
+    if (!r) { setKeys([]); return undefined; }
+    return safeOnValue(r, (s) => { const v = s.val(); setKeys(v && typeof v === 'object' ? Object.keys(v) : []); }, () => setKeys((k) => k || []));
+  }, [path]);
   return keys;
 }
 
@@ -47,7 +56,11 @@ export default function FriendsScreen({ navigation }) {
 
   useEffect(() => {
     if (tab === 'find' && !allUsers) {
-      get(ref(db, 'users')).then((s) => setAllUsers(s.exists() ? s.val() : {})).catch(() => setAllUsers({}));
+      get(ref(db, 'users')).then((s) => {
+        const out = {};
+        if (s.exists()) s.forEach((c) => { const u = normalizeUser(c.val()); if (u) out[c.key] = u; });
+        setAllUsers(out);
+      }).catch(() => setAllUsers({}));
     }
   }, [tab, allUsers]);
 
@@ -57,7 +70,7 @@ export default function FriendsScreen({ navigation }) {
     return Object.keys(allUsers)
       .filter((id) => id !== uid)
       .map((id) => ({ id, u: allUsers[id] }))
-      .filter(({ u }) => u && (!t || userDisplayName(u).toLowerCase().includes(t) || (u.username || '').toLowerCase().includes(t)))
+      .filter(({ u }) => u && (!t || userDisplayName(u).toLowerCase().includes(t) || u.username.toLowerCase().includes(t)))
       .slice(0, 60);
   }, [allUsers, q, uid]);
 

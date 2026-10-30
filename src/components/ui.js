@@ -2,11 +2,19 @@ import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, Image, ActivityIndicator, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { userDisplayName } from '../utils';
+import { safeUri } from '../safe';
 
 export function Screen({ children, style }) {
   const { theme } = useTheme();
   return <View style={[{ flex: 1, backgroundColor: theme.bg }, style]}>{children}</View>;
 }
+
+const renderable = (c) => {
+  if (c == null || typeof c === 'string' || typeof c === 'number' || typeof c === 'boolean') return c;
+  if (React.isValidElement(c)) return c;
+  if (Array.isArray(c)) return c.map((x, i) => (React.isValidElement(x) ? React.cloneElement(x, { key: x.key != null ? x.key : i }) : renderable(x)));
+  return '';
+};
 
 export function AppText({ children, style, muted, bold, size, ...rest }) {
   const { theme } = useTheme();
@@ -15,7 +23,7 @@ export function AppText({ children, style, muted, bold, size, ...rest }) {
       {...rest}
       style={[{ color: theme.text, fontFamily: bold ? 'Nunito-Black' : 'Nunito-Regular', fontSize: size || 15 }, muted && { opacity: 0.6 }, style]}
     >
-      {children}
+      {renderable(children)}
     </Text>
   );
 }
@@ -59,7 +67,7 @@ export function Avatar({ user, size = 44, online }) {
   const { theme } = useTheme();
   const name = userDisplayName(user);
   const letter = (name[0] || '?').toUpperCase();
-  const uri = user && user.profile_picture;
+  const uri = safeUri(user && user.profile_picture);
   const [failed, setFailed] = React.useState(false);
   React.useEffect(() => { setFailed(false); }, [uri]);
   return (

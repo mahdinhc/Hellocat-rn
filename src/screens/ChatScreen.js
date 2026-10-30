@@ -3,8 +3,7 @@ import { FlatList, View, TouchableOpacity, Image, Linking, KeyboardAvoidingView,
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { ref, onValue, query, orderByChild, limitToLast } from 'firebase/database';
-import { db } from '../firebase';
+import { query, limitToLast } from 'firebase/database';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText, Avatar, Row, Input, Loading } from '../components/ui';
@@ -12,6 +11,9 @@ import { useUser } from '../services/users';
 import { getOrCreateChat, sendTextMessage, sendFileMessage, removeMessage, markSeen, setTyping, uploadChatFile } from '../services/chat';
 import { userDisplayName, formatClock, isImageType, bytesToLabel } from '../utils';
 import { previewOf } from './ChatsScreen';
+import ErrorBoundary from '../components/ErrorBoundary';
+import { safeRef, safeOnValue, normalizeMessage, isValidKey } from '../safe';
+import { setActiveChat } from '../services/notifications';
 
 const PAGE = 40;
 
@@ -27,13 +29,13 @@ function Bubble({ m, mine, replied, onLongPress, theme }) {
   } else if (m.type === 'file') {
     if (isImageType(m.filetype) && m.url) {
       body = (
-        <TouchableOpacity onPress={() => Linking.openURL(m.url)}>
+        <TouchableOpacity onPress={() => { Linking.openURL(m.url).catch(() => {}); }}>
           <Image source={{ uri: m.url }} style={{ width: 220, height: 220, borderRadius: 8 }} resizeMode="cover" />
         </TouchableOpacity>
       );
     } else {
       body = (
-        <TouchableOpacity onPress={() => m.url && Linking.openURL(m.url)}>
+        <TouchableOpacity onPress={() => { if (m.url) Linking.openURL(m.url).catch(() => {}); }}>
           <Row><Ionicons name="document-outline" size={22} color={fg} /><AppText style={{ color: fg, marginLeft: 6, textDecorationLine: 'underline' }}>{m.filename || 'file'}</AppText></Row>
         </TouchableOpacity>
       );
@@ -64,11 +66,12 @@ function Bubble({ m, mine, replied, onLongPress, theme }) {
 }
 
 export default function ChatScreen({ route, navigation }) {
-  const { fid } = route.params;
+  const params = route.params || {};
+  const fid = isValidKey(params.fid) ? params.fid : null;
   const { uid } = useAuth();
   const { theme } = useTheme();
   const friend = useUser(fid);
-  const [cid, setCid] = useState(route.params.cid || null);
+  const [cid, setCid] = useState(isValidKey(params.cid) ? params.cid : null);
   const [limit, setLimit] = useState(PAGE);
   const [msgs, setMsgs] = useState(null);
   const [text, setText] = useState('');
@@ -78,7 +81,12 @@ export default function ChatScreen({ route, navigation }) {
   const [uploading, setUploading] = useState(false);
   const typingTimer = useRef(null);
 
-  useEffect(() => { if (!cid) getOrCreateChat(uid, fid).then(setCid).catch((e) => Alert.alert('Error', e.message)); }, [cid, uid, fid]);
+  useEffect(() => {
+    if (!cid && fid) getOrCreateChat(uid, fid).then((c) => { if (isValidKey(c)) setCid(c); else Alert.alert('Error', 'This conversation could not be opened.'); }).catch((e) => Alert.alert('Error', (e && e.message) || 'Could not open chat'));
+  }, [cid, uid, fid]);
+
+  // tell the notification service which chat is on screen so it does not notify for it
+  useEffect(() => { setActiveChat(cid); return () => setActiveChat(null); }, [cid]);
 
   useEffect(() => {
     navigation.setOptions({
@@ -96,22 +104,33 @@ export default function ChatScreen({ route, navigation }) {
     });
   }, [navigation, friend, online, friendTyping, theme, fid]);
 
-  useEffect(() => onValue(ref(db, 'status/' + fid + '/state'), (s) => setOnline(s.val() === 'online')), [fid]);
+  useEffect(() => {
+    const r = safeRef('status', fid, 'state');
+    if (!r) return undefined;
+    return safeOnValue(r, (s) => setOnline(s.val() === 'online'));
+  }, [fid]);
 
   useEffect(() => {
-    if (!cid) return undefined;
-    const q = query(ref(db, `chats_data/${cid}/messages`), orderByChild('timestamp'), limitToLast(limit));
-    return onValue(q, (snap) => {
-      const list = [];
-      snap.forEach((c) => { list.push({ key: c.key, ...c.val() }); });
-      list.sort((a, b) => (a.timestamp || Date.now()) - (b.timestamp || Date.now()));
-      setMsgs(list);
-    });
+    const r = cid ? safeRef('chats_data', cid, 'messages') : null;
+    if (!r) return undefined;
+    // push-keys are chronological, so ordering by key gives the newest `limit` messages without needing a DB index
+    return safeOnValue(
+      query(r, limitToLast(limit)),
+      (snap) => {
+        const list = [];
+        snap.forEach((c) => { list.push(normalizeMessage(c.key, c.val())); });
+        const now = Date.now();
+        list.sort((a, b) => (a.timestamp || now) - (b.timestamp || now));
+        setMsgs(list);
+      },
+      () => setMsgs((m) => m || []),
+    );
   }, [cid, limit]);
 
   useEffect(() => {
-    if (!cid) return undefined;
-    return onValue(ref(db, `chats_data/${cid}/typing/${fid}`), (s) => {
+    const r = cid ? safeRef('chats_data', cid, 'typing', fid) : null;
+    if (!r) return undefined;
+    return safeOnValue(r, (s) => {
       const v = s.val();
       setFriendTyping(typeof v === 'number' && v > 0 && Date.now() - v < 8000);
     });
@@ -120,10 +139,10 @@ export default function ChatScreen({ route, navigation }) {
   // mark incoming messages as seen
   useEffect(() => {
     if (!cid || !msgs) return;
-    msgs.forEach((m) => { if (m.send_to === uid && m.isSeenByReceiver === false) markSeen(cid, m.key); });
+    msgs.forEach((m) => { if (m.send_to === uid && !m.isSeenByReceiver && m.key) markSeen(cid, m.key); });
   }, [msgs, cid, uid]);
 
-  useEffect(() => () => { if (cid) setTyping(cid, uid, false); clearTimeout(typingTimer.current); }, [cid, uid]);
+  useEffect(() => () => { if (cid) { try { setTyping(cid, uid, false); } catch (e) { /* ignore */ } } clearTimeout(typingTimer.current); }, [cid, uid]);
 
   const onChange = (t) => {
     setText(t);
@@ -158,20 +177,24 @@ export default function ChatScreen({ route, navigation }) {
   };
 
   const pickImage = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-    if (!res.canceled && res.assets && res.assets[0]) {
-      const a = res.assets[0];
-      await sendAsset({ ...a, fileName: a.fileName || `photo_${Date.now()}.jpg` }, a.mimeType || 'image/jpeg');
-    }
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
+      if (!res.canceled && res.assets && res.assets[0]) {
+        const a = res.assets[0];
+        await sendAsset({ ...a, fileName: a.fileName || `photo_${Date.now()}.jpg` }, a.mimeType || 'image/jpeg');
+      }
+    } catch (e) { Alert.alert('Photo', (e && e.message) || 'Could not open photos'); }
   };
 
   const pickFile = async () => {
-    const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
-    if (!res.canceled && res.assets && res.assets[0]) {
-      const a = res.assets[0];
-      if (a.size && a.size > 25 * 1024 * 1024) return Alert.alert('Too large', 'Files over 25 MB are not supported (' + bytesToLabel(a.size) + ').');
-      await sendAsset({ ...a, fileName: a.name }, a.mimeType);
-    }
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+      if (!res.canceled && res.assets && res.assets[0]) {
+        const a = res.assets[0];
+        if (a.size && a.size > 25 * 1024 * 1024) { Alert.alert('Too large', 'Files over 25 MB are not supported (' + bytesToLabel(a.size) + ').'); return; }
+        await sendAsset({ ...a, fileName: a.name }, a.mimeType);
+      }
+    } catch (e) { Alert.alert('File', (e && e.message) || 'Could not open files'); }
   };
 
   const attach = () => Alert.alert('Attach', undefined, [
@@ -182,11 +205,12 @@ export default function ChatScreen({ route, navigation }) {
 
   const onLongPress = useCallback((m) => {
     const buttons = [{ text: 'Reply', onPress: () => setReplyTo(m) }];
-    if (m.send_from === uid && !m.removed) buttons.push({ text: 'Delete', style: 'destructive', onPress: () => removeMessage(cid, m.key) });
+    if (m.send_from === uid && !m.removed) buttons.push({ text: 'Delete', style: 'destructive', onPress: () => { removeMessage(cid, m.key).catch(() => {}); } });
     buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Message', undefined, buttons);
   }, [cid, uid]);
 
+  if (!fid) return <Screen><AppText muted style={{ textAlign: 'center', padding: 24 }}>This conversation is not available.</AppText></Screen>;
   if (!msgs) return <Loading />;
   const data = [...msgs].reverse();
 
@@ -198,7 +222,11 @@ export default function ChatScreen({ route, navigation }) {
           data={data}
           keyExtractor={(m) => m.key}
           contentContainerStyle={{ paddingVertical: 8 }}
-          renderItem={({ item }) => <Bubble m={item} mine={item.send_from === uid} replied={item.reply_of ? byKey[item.reply_of] : null} onLongPress={onLongPress} theme={theme} />}
+          renderItem={({ item }) => (
+            <ErrorBoundary compact name="bubble">
+              <Bubble m={item} mine={item.send_from === uid} replied={item.reply_of ? byKey[item.reply_of] : null} onLongPress={onLongPress} theme={theme} />
+            </ErrorBoundary>
+          )}
           onEndReached={() => { if (msgs.length >= limit) setLimit((l) => l + PAGE); }}
           onEndReachedThreshold={0.3}
         />

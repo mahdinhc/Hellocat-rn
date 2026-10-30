@@ -10,6 +10,8 @@ import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { THEMES } from '../theme/themes';
 import { Screen, AppText, Avatar, Row, Button, Input, Loading, Empty } from '../components/ui';
+import { Switch, Linking } from 'react-native';
+import { getNotificationSettings, loadNotificationSettings, saveNotificationSettings, requestPermission, hasPermission, sendTestNotification, setupNotifications } from '../services/notifications';
 import { uploadLocalFile } from '../services/chat';
 import { invalidateUser } from '../services/users';
 import { validateName, formatDateTime } from '../utils';
@@ -30,6 +32,7 @@ export function SettingsScreen({ navigation }) {
     <Screen>
       <Item icon="person-outline" label="Profile" to="SettingsProfile" />
       <Item icon="key-outline" label="Account" to="SettingsAccount" />
+      <Item icon="notifications-outline" label="Notifications" to="SettingsNotifications" />
       <Item icon="color-palette-outline" label="Theme" to="SettingsTheme" />
       <Item icon="time-outline" label="Login history" to="SettingsHistory" />
       <Item icon="log-out-outline" label="Sign out" onPress={() => Alert.alert('Sign out?', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} />
@@ -169,6 +172,70 @@ export function SettingsHistoryScreen() {
           </View>
         )}
       />
+    </Screen>
+  );
+}
+
+export function SettingsNotificationsScreen() {
+  const { theme } = useTheme();
+  const [st, setSt] = useState(getNotificationSettings());
+  const [allowed, setAllowed] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    loadNotificationSettings().then((v) => { if (alive) setSt({ ...v }); }).catch(() => {});
+    hasPermission().then((g) => { if (alive) setAllowed(g); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const update = async (patch) => {
+    try {
+      if (patch.enabled === true) {
+        const ok = await requestPermission();
+        setAllowed(ok);
+        if (!ok) {
+          Alert.alert('Notifications are blocked', 'Allow notifications for HelloCat in your phone settings to get message alerts.', [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open settings', onPress: () => { Linking.openSettings().catch(() => {}); } },
+          ]);
+        }
+      }
+      const next = await saveNotificationSettings(patch);
+      setSt({ ...next });
+      if ('sound' in patch || 'vibrate' in patch) setupNotifications();
+    } catch (e) { /* settings must never crash the app */ }
+  };
+
+  const test = async () => {
+    const ok = await sendTestNotification();
+    if (!ok) Alert.alert('Notifications are blocked', 'Allow notifications for HelloCat in your phone settings first.');
+  };
+
+  const Toggle = ({ label, hint, k, disabled }) => (
+    <Row style={{ paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010', opacity: disabled ? 0.45 : 1 }}>
+      <View style={{ flex: 1, paddingRight: 12 }}>
+        <AppText>{label}</AppText>
+        {hint ? <AppText size={12} muted>{hint}</AppText> : null}
+      </View>
+      <Switch value={!!st[k]} disabled={disabled} onValueChange={(v) => update({ [k]: v })} trackColor={{ true: theme.link, false: '#8885' }} thumbColor="#fff" />
+    </Row>
+  );
+
+  return (
+    <Screen>
+      <ScrollView>
+        <Toggle label="Message notifications" hint="Get notified when anyone sends you a message" k="enabled" />
+        <Toggle label="Show message preview" hint="Turn off to hide the message text in notifications" k="preview" disabled={!st.enabled} />
+        <Toggle label="Sound" k="sound" disabled={!st.enabled} />
+        <Toggle label="Vibrate" k="vibrate" disabled={!st.enabled} />
+        {!allowed && st.enabled ? (
+          <AppText size={12} style={{ color: '#e5484d', padding: 18 }}>Android is currently blocking HelloCat notifications. Enable them in your phone's app settings.</AppText>
+        ) : null}
+        <View style={{ padding: 18 }}>
+          <Button title="Send a test notification" secondary onPress={test} disabled={!st.enabled} />
+          <AppText size={12} muted style={{ marginTop: 14 }}>You will not be notified for the chat you currently have open. Alerts are delivered while HelloCat is open or recently used in the background.</AppText>
+        </View>
+      </ScrollView>
     </Screen>
   );
 }

@@ -5,6 +5,7 @@ import { auth, db } from './firebase';
 import { startPresence, setOffline, logHistory } from './services/presence';
 import { useTheme } from './theme/ThemeContext';
 import { invalidateUser } from './services/users';
+import { normalizeUser, reportError } from './safe';
 
 // status: 'loading' | 'signedOut' | 'unverified' | 'noProfile' | 'ready'
 const AuthContext = createContext(null);
@@ -27,7 +28,7 @@ export function AuthProvider({ children }) {
     try {
       const snap = await get(ref(db, 'users/' + u.uid));
       if (snap.exists()) {
-        const val = snap.val();
+        const val = normalizeUser(snap.val()) || {};
         setProfile(val);
         if (!themeApplied.current && val.theme) { applyTheme(val.theme); themeApplied.current = true; }
         setStatus('ready');
@@ -36,11 +37,12 @@ export function AuthProvider({ children }) {
         setStatus('noProfile');
       }
     } catch (e) {
+      reportError(e, 'evaluate-profile');
       setStatus('noProfile');
     }
   }, [applyTheme]);
 
-  useEffect(() => onAuthStateChanged(auth, (u) => { evaluate(u); }), [evaluate]);
+  useEffect(() => onAuthStateChanged(auth, (u) => { evaluate(u).catch((e) => reportError(e, 'auth-state')); }), [evaluate]);
 
   // presence while ready
   useEffect(() => {
@@ -62,7 +64,7 @@ export function AuthProvider({ children }) {
     if (!auth.currentUser) return;
     invalidateUser(auth.currentUser.uid);
     const snap = await get(ref(db, 'users/' + auth.currentUser.uid));
-    if (snap.exists()) setProfile(snap.val());
+    if (snap.exists()) setProfile(normalizeUser(snap.val()) || {});
   }, []);
 
   const signOut = useCallback(async () => {

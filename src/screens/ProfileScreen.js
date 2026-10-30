@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { FlatList, View, Alert, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ref, onValue, get } from 'firebase/database';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db, firestore } from '../firebase';
+import { firestore } from '../firebase';
+import { safeRef, safeOnValue, isValidKey } from '../safe';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText, Avatar, Row, Button, Loading, Empty } from '../components/ui';
@@ -35,18 +35,26 @@ export default function ProfileScreen({ route, navigation }) {
   const [busy, setBusy] = useState(false);
 
   const loadRel = useCallback(async () => {
-    if (own) return;
-    setRel(await getRelationType(myUid, uid));
-    setFollowing(await isFollowing(myUid, uid));
+    if (own || !isValidKey(uid)) return;
+    try {
+      setRel(await getRelationType(myUid, uid));
+      setFollowing(await isFollowing(myUid, uid));
+    } catch (e) { /* relationship info is optional */ }
   }, [own, myUid, uid]);
 
   useEffect(() => { getUser(uid, true).then((u) => setUser(u || null)); }, [uid]);
-  useEffect(() => onValue(ref(db, 'status/' + uid + '/state'), (s) => setOnline(s.val() === 'online')), [uid]);
+  useEffect(() => {
+    const r = safeRef('status', uid, 'state');
+    if (!r) return undefined;
+    return safeOnValue(r, (s) => setOnline(s.val() === 'online'));
+  }, [uid]);
   useEffect(() => { loadRel(); }, [loadRel]);
 
   useEffect(() => {
-    const unsubs = ['friendships', 'followers', 'following'].map((k) =>
-      onValue(ref(db, `${k}/${uid}`), (s) => setCounts((c) => ({ ...c, [k === 'friendships' ? 'friends' : k]: s.numChildren() }))));
+    const unsubs = ['friendships', 'followers', 'following'].map((k) => {
+      const r = safeRef(k, uid);
+      return r ? safeOnValue(r, (s) => setCounts((c) => ({ ...c, [k === 'friendships' ? 'friends' : k]: s.numChildren() }))) : () => {};
+    });
     return () => unsubs.forEach((u) => u());
   }, [uid]);
 
@@ -65,7 +73,7 @@ export default function ProfileScreen({ route, navigation }) {
 
   const act = async (fn) => {
     setBusy(true);
-    try { await fn(); await loadRel(); } catch (e) { Alert.alert('Error', e.message); }
+    try { await fn(); await loadRel(); } catch (e) { Alert.alert('Error', (e && e.message) || 'Something went wrong'); }
     setBusy(false);
   };
 

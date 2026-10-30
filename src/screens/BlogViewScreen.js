@@ -2,7 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { FlatList, View, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { doc, getDoc, deleteDoc } from 'firebase/firestore';
-import { ref, onValue, push, remove, runTransaction, serverTimestamp } from 'firebase/database';
+import { ref, push, remove, runTransaction, serverTimestamp } from 'firebase/database';
+import { safeRef, safeOnValue, str, isValidKey } from '../safe';
 import { firestore, db } from '../firebase';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
@@ -49,11 +50,19 @@ export default function BlogViewScreen({ route, navigation }) {
     runTransaction(ref(db, `blogs/${id}/views`), (v) => (v || 0) + 1).catch(() => {});
   }, [id]);
 
-  useEffect(() => onValue(ref(db, `blogs/${id}/comments`), (s) => {
-    const list = [];
-    s.forEach((c) => { const v = c.val(); list.push({ key: c.key, author: v.author, content: v.content, ts: v.ts, reply_of: v.reply_of || null }); });
-    setComments(list);
-  }), [id]);
+  useEffect(() => {
+    const r = safeRef('blogs', id, 'comments');
+    if (!r) return undefined;
+    return safeOnValue(r, (s) => {
+      const list = [];
+      s.forEach((c) => {
+        const v = c.val();
+        if (!v || typeof v !== 'object') return;
+        list.push({ key: c.key, author: str(v.author), content: str(v.content), ts: typeof v.ts === 'number' ? v.ts : 0, reply_of: isValidKey(v.reply_of) ? v.reply_of : null });
+      });
+      setComments(list);
+    });
+  }, [id]);
 
   const ordered = useMemo(() => {
     const tops = comments.filter((c) => !c.reply_of || !comments.find((x) => x.key === c.reply_of)).sort((a, b) => (a.ts || 0) - (b.ts || 0));

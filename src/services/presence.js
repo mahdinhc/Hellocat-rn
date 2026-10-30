@@ -6,6 +6,14 @@ const ua = () => `${APP_VERSION} (${Platform.OS} ${Platform.Version})`;
 
 // Marks the user online while connected, offline on disconnect (same schema as the web app).
 export function startPresence(uid) {
+  try {
+    return startPresenceUnsafe(uid);
+  } catch (e) {
+    return () => {};
+  }
+}
+
+function startPresenceUnsafe(uid) {
   const statusRef = ref(db, 'status/' + uid);
   const off = { state: 'offline', last_changed: serverTimestamp(), ua: ua() };
   const on = { state: 'online', last_changed: serverTimestamp(), ua: ua() };

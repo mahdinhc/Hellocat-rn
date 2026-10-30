@@ -6,9 +6,9 @@ import { makeChatId, randomString } from '../utils';
 // Returns the chat id for uid<->fid, creating the conversation if needed.
 export async function getOrCreateChat(uid, fid) {
   const existing = await get(ref(db, `chats/${uid}/${fid}`));
-  if (existing.exists()) return existing.val();
+  if (existing.exists() && typeof existing.val() === 'string') return existing.val();
   const other = await get(ref(db, `chats/${fid}/${uid}`));
-  if (other.exists()) {
+  if (other.exists() && typeof other.val() === 'string') {
     await update(ref(db, 'chats/' + uid), { [fid]: other.val() });
     return other.val();
   }
@@ -42,7 +42,7 @@ export function removeMessage(cid, mid) {
 }
 
 export function markSeen(cid, mid) {
-  return update(ref(db, `chats_data/${cid}/messages/${mid}`), { isSeenByReceiver: true }).catch(() => {});
+  return update(ref(db, `chats_data/${cid}/messages/${mid}`), { isSeenByReceiver: true, seenByReceiverAt: serverTimestamp() }).catch(() => {});
 }
 
 export function setTyping(cid, uid, typing) {

@@ -9,9 +9,10 @@ export function formatName(a = '', b = '') {
 }
 
 export function userDisplayName(u) {
-  if (!u) return 'Unknown';
-  const n = Array.isArray(u.name) ? u.name : [];
-  return formatName(n[0], n[1]) || u.username || 'Unknown';
+  if (!u || typeof u !== 'object') return 'Unknown';
+  const n = Array.isArray(u.name) ? u.name : (u.name && typeof u.name === 'object' ? [u.name[0], u.name[1]] : []);
+  const un = typeof u.username === 'string' ? u.username : '';
+  return formatName(n[0], n[1]) || un || 'Unknown';
 }
 
 export function randomString(length) {
@@ -41,7 +42,7 @@ export function makeChatId(uid, fid) {
 }
 
 export function timeAgo(ts) {
-  if (!ts) return '';
+  if (typeof ts !== 'number' || !isFinite(ts) || ts <= 0) return '';
   const s = Math.floor((Date.now() - ts) / 1000);
   if (s < 5) return 'just now';
   if (s < 60) return s + 's ago';
@@ -57,7 +58,7 @@ export function timeAgo(ts) {
 }
 
 export function formatClock(ts) {
-  if (!ts) return '';
+  if (typeof ts !== 'number' || !isFinite(ts) || ts <= 0) return '';
   const d = new Date(ts);
   let h = d.getHours();
   const m = String(d.getMinutes()).padStart(2, '0');
@@ -67,8 +68,8 @@ export function formatClock(ts) {
 }
 
 export function formatDateTime(ts) {
-  if (!ts) return '';
-  return new Date(ts).toLocaleString();
+  if (typeof ts !== 'number' || !isFinite(ts) || ts <= 0) return '';
+  try { return new Date(ts).toLocaleString(); } catch (e) { return ''; }
 }
 
 export function formatNumber(n) {
@@ -82,7 +83,8 @@ export function formatNumber(n) {
 export function snapshotToList(snap) {
   const out = [];
   snap.forEach((c) => {
-    out.push({ key: c.key, ...(typeof c.val() === 'object' ? c.val() : { value: c.val() }) });
+    const v = c.val();
+    out.push({ key: c.key, ...(v && typeof v === 'object' ? v : { value: v }) });
   });
   return out;
 }

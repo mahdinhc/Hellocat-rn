@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { View, Image, TouchableOpacity, Linking, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ref, onValue, set, remove, serverTimestamp } from 'firebase/database';
+import { ref, set, remove, serverTimestamp } from 'firebase/database';
 import { db } from '../firebase';
+import { safeRef, safeOnValue, safeUri } from '../safe';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { AppText, Avatar, Row, Card } from '../components/ui';
@@ -16,7 +17,7 @@ export function RichText({ text, style, size }) {
   return (
     <AppText size={size} style={style}>
       {parts.map((p, i) => {
-        if (/^https?:\/\//.test(p)) return <Text key={i} style={{ color: theme.link, textDecorationLine: 'underline' }} onPress={() => Linking.openURL(p)}>{p}</Text>;
+        if (/^https?:\/\//.test(p)) return <Text key={i} style={{ color: theme.link, textDecorationLine: 'underline' }} onPress={() => { Linking.openURL(p).catch(() => {}); }}>{p}</Text>;
         if (p.startsWith('#') && p.length > 1) return <Text key={i} style={{ color: theme.link }}>{p}</Text>;
         return <Text key={i}>{p}</Text>;
       })}
@@ -25,15 +26,15 @@ export function RichText({ text, style, size }) {
 }
 
 export function Attachments({ items }) {
-  if (!items || !items.length) return null;
+  if (!Array.isArray(items) || !items.length) return null;
   return (
     <View style={{ marginTop: 8 }}>
       {items.map((a, i) => {
-        if (a && a.src && typeof a.type === 'string' && a.type.startsWith('image')) {
-          return <Image key={i} source={{ uri: a.src }} style={{ width: '100%', height: 220, borderRadius: 8, marginBottom: 6 }} resizeMode="cover" />;
+        if (a && safeUri(a.src) && typeof a.type === 'string' && a.type.startsWith('image')) {
+          return <Image key={i} source={{ uri: safeUri(a.src) }} style={{ width: '100%', height: 220, borderRadius: 8, marginBottom: 6 }} resizeMode="cover" />;
         }
         return (
-          <TouchableOpacity key={i} onPress={() => a && a.src && Linking.openURL(a.src)} style={{ paddingVertical: 6 }}>
+          <TouchableOpacity key={i} onPress={() => { if (a && safeUri(a.src)) Linking.openURL(a.src).catch(() => {}); }} style={{ paddingVertical: 6 }}>
             <Row><Ionicons name="attach" size={18} color="#888" /><AppText muted style={{ marginLeft: 4, textDecorationLine: 'underline' }}>{(a && a.name) || 'Attachment'} ({(a && a.type) || 'file'})</AppText></Row>
           </TouchableOpacity>
         );
@@ -45,15 +46,19 @@ export function Attachments({ items }) {
 export function useBlogMeta(id) {
   const [meta, setMeta] = useState({ likes: 0, comments: 0, views: 0, mine: false });
   const { uid } = useAuth();
-  useEffect(() => onValue(ref(db, 'blogs/' + id), (s) => {
+  useEffect(() => {
+    const r = safeRef('blogs', id);
+    if (!r) return undefined;
+    return safeOnValue(r, (s) => {
     const reacts = s.child('reacts');
     setMeta({
       likes: reacts.numChildren(),
       comments: s.child('comments').numChildren(),
       views: Number(s.child('views').val()) || 0,
-      mine: reacts.child(uid).exists(),
+      mine: !!uid && reacts.child(uid).exists(),
     });
-  }), [id, uid]);
+    });
+  }, [id, uid]);
   return meta;
 }
 

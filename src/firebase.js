@@ -29,4 +29,4 @@ export { app, auth };
 export const db = getDatabase(app);
 export const firestore = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 export const storage = getStorage(app);
-export const APP_VERSION = 'HELLOCAT_APP-v1.0.0';
+export const APP_VERSION = 'HELLOCAT_APP-v1.1.0';
