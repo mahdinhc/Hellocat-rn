@@ -12,10 +12,25 @@ import { useUser } from '../services/users';
 import { userDisplayName, timeAgo } from '../utils';
 import { BlogCard, RichText } from './BlogComponents';
 
-function CommentRow({ c, indent, onReply, onDelete, navigation }) {
+function CommentRow({ c, bid, indent, onReply, onDelete, navigation }) {
   const { uid } = useAuth();
   const { theme } = useTheme();
   const author = useUser(c.author);
+  const reacts = c.reacts || {};
+  const hasReacted = !!(uid && reacts[uid]);
+  const reactCount = Object.keys(reacts).length;
+
+  const toggleCommentReact = () => {
+    if (!uid || !bid || !c.key) return;
+    const r = safeRef('blogs', bid, 'comments', c.key, 'reacts', uid);
+    if (!r) return;
+    if (hasReacted) {
+      remove(r).catch(() => {});
+    } else {
+      set(r, serverTimestamp()).catch(() => {});
+    }
+  };
+
   return (
     <View style={{ marginLeft: indent ? 40 : 0, paddingHorizontal: 14, paddingVertical: 8 }}>
       <Row style={{ alignItems: 'flex-start' }}>
@@ -26,7 +41,13 @@ function CommentRow({ c, indent, onReply, onDelete, navigation }) {
             <AppText size={11} muted>{timeAgo(c.ts)}</AppText>
           </Row>
           <RichText text={c.content} size={14} style={{ color: theme.cardText, marginTop: 2 }} />
-          <Row style={{ marginTop: 6 }}>
+          <Row style={{ marginTop: 8, alignItems: 'center' }}>
+            <TouchableOpacity onPress={toggleCommentReact} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}>
+              <Ionicons name={hasReacted ? 'heart' : 'heart-outline'} size={16} color={hasReacted ? '#e5484d' : theme.cardText} />
+              {reactCount > 0 ? (
+                <AppText size={12} style={{ marginLeft: 4, color: theme.cardText }}>{formatNumber(reactCount)}</AppText>
+              ) : null}
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => onReply(c)}><AppText size={12} style={{ color: theme.link }}>Reply</AppText></TouchableOpacity>
             {c.author === uid ? <TouchableOpacity onPress={() => onDelete(c)} style={{ marginLeft: 16 }}><AppText size={12} style={{ color: '#e5484d' }}>Delete</AppText></TouchableOpacity> : null}
           </Row>
@@ -58,7 +79,14 @@ export default function BlogViewScreen({ route, navigation }) {
       s.forEach((c) => {
         const v = c.val();
         if (!v || typeof v !== 'object') return;
-        list.push({ key: c.key, author: str(v.author), content: str(v.content), ts: typeof v.ts === 'number' ? v.ts : 0, reply_of: isValidKey(v.reply_of) ? v.reply_of : null });
+        list.push({
+          key: c.key,
+          author: str(v.author),
+          content: str(v.content),
+          ts: typeof v.ts === 'number' ? v.ts : 0,
+          reply_of: isValidKey(v.reply_of) ? v.reply_of : null,
+          reacts: v.reacts && typeof v.reacts === 'object' ? v.reacts : {},
+        });
       });
       setComments(list);
     });
@@ -114,7 +142,7 @@ export default function BlogViewScreen({ route, navigation }) {
           data={ordered}
           keyExtractor={(c) => c.key}
           ListHeaderComponent={<BlogCard post={post} navigation={navigation} detail />}
-          renderItem={({ item }) => <CommentRow c={item} indent={item.indent} onReply={setReplyTo} onDelete={delComment} navigation={navigation} />}
+          renderItem={({ item }) => <CommentRow c={item} bid={id} indent={item.indent} onReply={setReplyTo} onDelete={delComment} navigation={navigation} />}
           ListEmptyComponent={<AppText muted style={{ textAlign: 'center', padding: 24 }}>No comments yet.</AppText>}
           keyboardShouldPersistTaps="handled"
         />

@@ -27,7 +27,7 @@ export function previewOf(m, uid) {
   }
 }
 
-function ChatRow({ fid, cid, onOpen, onLongPress, reportTs }) {
+function ChatRow({ fid, cid, onOpen, reportTs }) {
   const { uid } = useAuth();
   const { theme } = useTheme();
   const [user, setUser] = useState(null);
@@ -57,7 +57,7 @@ function ChatRow({ fid, cid, onOpen, onLongPress, reportTs }) {
 
   const unread = !!(last && last.send_to === uid && !last.isSeenByReceiver && !last.removed && last.type !== 'event');
   return (
-    <TouchableOpacity onPress={() => onOpen(fid, cid)} onLongPress={() => onLongPress(fid, user)} activeOpacity={0.7}>
+    <TouchableOpacity onPress={() => onOpen(fid, cid)} activeOpacity={0.7}>
       <Row style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
         <Avatar user={user} size={52} online={online} />
         <View style={{ flex: 1, marginLeft: 12 }}>
@@ -111,12 +111,6 @@ export default function ChatsScreen({ navigation }) {
   }, [chats, tsMap]);
 
   const open = useCallback((fid, cid) => navigation.navigate('Chat', { fid, cid }), [navigation]);
-  const longPress = useCallback((fid, user) => {
-    Alert.alert(userDisplayName(user), 'Remove this conversation from your list?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => { removeConversation(uid, fid).catch(() => {}); } },
-    ]);
-  }, [uid]);
 
   if (!chats) return <Loading />;
   return (
@@ -132,7 +126,7 @@ export default function ChatsScreen({ navigation }) {
           removeClippedSubviews
           renderItem={({ item }) => (
             <ErrorBoundary compact name="chat-row">
-              <ChatRow fid={item.fid} cid={item.cid} onOpen={open} onLongPress={longPress} reportTs={reportTs} />
+              <ChatRow fid={item.fid} cid={item.cid} onOpen={open} reportTs={reportTs} />
             </ErrorBoundary>
           )}
         />

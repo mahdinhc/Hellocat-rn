@@ -83,7 +83,7 @@ function Tabs() {
         tabBarBadgeStyle: { backgroundColor: theme.badge },
       })}
     >
-      <Tab.Screen name="Chats" component={ChatsScreen} options={{ title: 'HelloCat' }} />
+      <Tab.Screen name="Chats" component={ChatsScreen} options={{ title: 'Hellocat' }} />
       <Tab.Screen name="Posts" component={BlogsScreen} />
       <Tab.Screen name="Friends" component={FriendsScreen} options={{ tabBarBadge: reqs > 0 ? reqs : undefined }} />
       <Tab.Screen name="Me" component={ProfileScreen} options={{ title: 'My profile' }} />

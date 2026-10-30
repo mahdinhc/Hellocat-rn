@@ -3,7 +3,7 @@ import { View, Image, TouchableOpacity, Linking, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ref, set, remove, serverTimestamp } from 'firebase/database';
 import { db } from '../firebase';
-import { safeRef, safeOnValue, safeUri } from '../safe';
+import { safeRef, safeOnValue, safeUri, isValidKey } from '../safe';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { AppText, Avatar, Row, Card } from '../components/ui';
@@ -63,7 +63,9 @@ export function useBlogMeta(id) {
 }
 
 export function toggleLike(id, uid, liked) {
-  const r = ref(db, `blogs/${id}/reacts/${uid}`);
+  if (!uid || !isValidKey(id)) return Promise.resolve();
+  const r = safeRef('blogs', id, 'reacts', uid);
+  if (!r) return Promise.resolve();
   return liked ? remove(r) : set(r, serverTimestamp());
 }
 
