@@ -1,0 +1,9 @@
+name = "hellocat-push"
+main = "index.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "hellocat-app"
+DATABASE_URL = "https://hellocat-app-default-rtdb.firebaseio.com"
+WEB_API_KEY = "AIzaSyCRoTx-p0r3DcU2TbeCG1csftOPGR76Ds4"
+# secret (not stored here):  npx wrangler secret put SERVICE_ACCOUNT   -> paste the service-account JSON

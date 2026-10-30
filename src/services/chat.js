@@ -2,6 +2,14 @@ import { ref, get, update, push, remove, set, serverTimestamp } from 'firebase/d
 import { ref as sref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { makeChatId, randomString } from '../utils';
+import { notifyPush } from './pushNotify';
+
+// push() returns a promise-like ref; once the server has the message, ask the worker to send the push.
+function pushAndNotify(cid, data) {
+  const p = push(ref(db, `chats_data/${cid}/messages`), data);
+  p.then(() => notifyPush(cid, p.key)).catch(() => {});
+  return p;
+}
 
 // Returns the chat id for uid<->fid, creating the conversation if needed.
 export async function getOrCreateChat(uid, fid) {
@@ -24,14 +32,14 @@ export async function getOrCreateChat(uid, fid) {
 }
 
 export function sendTextMessage(cid, uid, fid, text, replyOf = null) {
-  return push(ref(db, `chats_data/${cid}/messages`), {
+  return pushAndNotify(cid, {
     type: 'text', data: text, send_from: uid, send_to: fid,
     timestamp: serverTimestamp(), isSeenByReceiver: false, reply_of: replyOf, style: null,
   });
 }
 
 export function sendFileMessage(cid, uid, fid, url, filetype, filename, ext, replyOf = null) {
-  return push(ref(db, `chats_data/${cid}/messages`), {
+  return pushAndNotify(cid, {
     type: 'file', filetype, filename, url, ext, send_from: uid, send_to: fid,
     timestamp: serverTimestamp(), isSeenByReceiver: false, reply_of: replyOf,
   });

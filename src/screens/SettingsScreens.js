@@ -233,7 +233,7 @@ export function SettingsNotificationsScreen() {
         ) : null}
         <View style={{ padding: 18 }}>
           <Button title="Send a test notification" secondary onPress={test} disabled={!st.enabled} />
-          <AppText size={12} muted style={{ marginTop: 14 }}>You will not be notified for the chat you currently have open. Alerts are delivered while HelloCat is open or recently used in the background.</AppText>
+          <AppText size={12} muted style={{ marginTop: 14 }}>You will not be notified for the chat you currently have open. If push is set up for this build, alerts also arrive when HelloCat is closed.</AppText>
         </View>
       </ScrollView>
     </Screen>

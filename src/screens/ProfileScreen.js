@@ -3,7 +3,7 @@ import { FlatList, View, Alert, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { firestore } from '../firebase';
-import { safeRef, safeOnValue, isValidKey } from '../safe';
+import { safeRef, safeOnValue, isValidKey, reportError } from '../safe';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText, Avatar, Row, Button, Loading, Empty } from '../components/ui';
@@ -11,6 +11,8 @@ import { getUser } from '../services/users';
 import { getRelationType, sendFriendRequest, cancelFriendRequest, acceptFriendRequest, rejectFriendRequest, unfriendUser, isFollowing, follow, unfollow } from '../services/friends';
 import { userDisplayName, formatNumber } from '../utils';
 import { BlogCard } from './BlogComponents';
+import ErrorBoundary from '../components/ErrorBoundary';
+
 
 function Stat({ label, value }) {
   return (
@@ -42,11 +44,17 @@ export default function ProfileScreen({ route, navigation }) {
     } catch (e) { /* relationship info is optional */ }
   }, [own, myUid, uid]);
 
-  useEffect(() => { getUser(uid, true).then((u) => setUser(u || null)); }, [uid]);
+  useEffect(() => {
+    let alive = true;
+    setUser(undefined);
+    getUser(uid, true).then((u) => { if (alive) setUser(u || null); }).catch(() => { if (alive) setUser(null); });
+    return () => { alive = false; };
+  }, [uid]);
   useEffect(() => {
     const r = safeRef('status', uid, 'state');
     if (!r) return undefined;
-    return safeOnValue(r, (s) => setOnline(s.val() === 'online'));
+    const un = safeOnValue(r, (s) => setOnline(s.val() === 'online'));
+    return () => { if (typeof un === 'function') un(); };
   }, [uid]);
   useEffect(() => { loadRel(); }, [loadRel]);
 
@@ -55,19 +63,20 @@ export default function ProfileScreen({ route, navigation }) {
       const r = safeRef(k, uid);
       return r ? safeOnValue(r, (s) => setCounts((c) => ({ ...c, [k === 'friendships' ? 'friends' : k]: s.numChildren() }))) : () => {};
     });
-    return () => unsubs.forEach((u) => u());
+    return () => unsubs.forEach((u) => { if (typeof u === 'function') u(); });
   }, [uid]);
 
   useEffect(() => {
     (async () => {
       try {
-        const base = [collection(firestore, 'blogs'), where('uid', '==', uid)];
-        if (!own) base.push(where('visibility', '==', 'public'));
-        const snap = await getDocs(query(...base));
+        const q = own
+          ? query(collection(firestore, 'blogs'), where('uid', '==', uid))
+          : query(collection(firestore, 'blogs'), where('uid', '==', uid), where('visibility', '==', 'public'));
+        const snap = await getDocs(q);
         const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         items.sort((a, b) => ((b.server_ts && b.server_ts.toMillis ? b.server_ts.toMillis() : 0) - (a.server_ts && a.server_ts.toMillis ? a.server_ts.toMillis() : 0)));
         setPosts(items);
-      } catch (e) { setPosts([]); }
+      } catch (e) { reportError(e, 'profile-posts'); setPosts([]); }
     })();
   }, [uid, own]);
 
@@ -78,7 +87,7 @@ export default function ProfileScreen({ route, navigation }) {
   };
 
   useEffect(() => {
-    if (own) {
+    if (own && navigation && typeof navigation.setOptions === 'function') {
       navigation.setOptions({ headerRight: () => <TouchableOpacity onPress={() => navigation.navigate('Settings')}><Ionicons name="settings-outline" size={24} color={theme.primaryText} /></TouchableOpacity> });
     }
   }, [own, navigation, theme]);
@@ -122,9 +131,9 @@ export default function ProfileScreen({ route, navigation }) {
     <Screen style={{ backgroundColor: theme.feedBg }}>
       <FlatList
         data={posts}
-        keyExtractor={(p) => p.id}
+        keyExtractor={(p, i) => String((p && p.id) || i)}
         ListHeaderComponent={Header}
-        renderItem={({ item }) => <BlogCard post={item} navigation={navigation} showAuthor={false} />}
+        renderItem={({ item }) => <ErrorBoundary compact name="profile-post"><BlogCard post={item} navigation={navigation} showAuthor={false} /></ErrorBoundary>}
         ListEmptyComponent={<AppText muted style={{ textAlign: 'center', padding: 20 }}>No posts yet.</AppText>}
         contentContainerStyle={{ paddingBottom: 30 }}
       />

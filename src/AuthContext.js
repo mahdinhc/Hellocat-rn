@@ -3,6 +3,7 @@ import { onAuthStateChanged, signOut as fbSignOut } from 'firebase/auth';
 import { ref, get } from 'firebase/database';
 import { auth, db } from './firebase';
 import { startPresence, setOffline, logHistory } from './services/presence';
+import { unregisterPush } from './services/notifications';
 import { useTheme } from './theme/ThemeContext';
 import { invalidateUser } from './services/users';
 import { normalizeUser, reportError } from './safe';
@@ -70,7 +71,7 @@ export function AuthProvider({ children }) {
   const signOut = useCallback(async () => {
     const uid = auth.currentUser && auth.currentUser.uid;
     themeApplied.current = false;
-    if (uid) await setOffline(uid);
+    if (uid) { await unregisterPush(uid); await setOffline(uid); }
     await fbSignOut(auth);
   }, []);
 
