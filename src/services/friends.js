@@ -1,13 +1,24 @@
 import { ref, get, update, remove, serverTimestamp } from 'firebase/database';
 import { db } from '../firebase';
+import { safeRef, isValidKey } from '../safe';
 
 export async function getRelationType(uid, fid) {
+  if (!isValidKey(uid) || !isValidKey(fid)) {
+    return { is_friend: false, recieved: false, sent: false };
+  }
+  const rFriend = safeRef('friendships', uid, fid);
+  const rRecv = safeRef('friend_req', 'recieved', uid, fid);
+  const rSent = safeRef('friend_req', 'sent', uid, fid);
   const [a, b, c] = await Promise.all([
-    get(ref(db, `friendships/${uid}/${fid}`)),
-    get(ref(db, `friend_req/recieved/${uid}/${fid}`)),
-    get(ref(db, `friend_req/sent/${uid}/${fid}`)),
+    rFriend ? get(rFriend).catch(() => null) : null,
+    rRecv ? get(rRecv).catch(() => null) : null,
+    rSent ? get(rSent).catch(() => null) : null,
   ]);
-  return { is_friend: a.exists(), recieved: b.exists(), sent: c.exists() };
+  return {
+    is_friend: !!(a && typeof a.exists === 'function' && a.exists()),
+    recieved: !!(b && typeof b.exists === 'function' && b.exists()),
+    sent: !!(c && typeof c.exists === 'function' && c.exists()),
+  };
 }
 
 export async function sendFriendRequest(uid, fid) {
@@ -38,8 +49,11 @@ export async function unfriendUser(uid, fid) {
 }
 
 export async function isFollowing(uid, fid) {
-  const s = await get(ref(db, `following/${uid}/${fid}`));
-  return s.exists();
+  if (!isValidKey(uid) || !isValidKey(fid)) return false;
+  const r = safeRef('following', uid, fid);
+  if (!r) return false;
+  const s = await get(r).catch(() => null);
+  return !!(s && typeof s.exists === 'function' && s.exists());
 }
 
 export async function follow(uid, fid) {

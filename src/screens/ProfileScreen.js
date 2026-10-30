@@ -59,25 +59,49 @@ export default function ProfileScreen({ route, navigation }) {
   useEffect(() => { loadRel(); }, [loadRel]);
 
   useEffect(() => {
+    if (!isValidKey(uid)) return undefined;
     const unsubs = ['friendships', 'followers', 'following'].map((k) => {
       const r = safeRef(k, uid);
-      return r ? safeOnValue(r, (s) => setCounts((c) => ({ ...c, [k === 'friendships' ? 'friends' : k]: s.numChildren() }))) : () => {};
+      return r ? safeOnValue(r, (s) => {
+        if (s && typeof s.numChildren === 'function') {
+          setCounts((c) => ({ ...c, [k === 'friendships' ? 'friends' : k]: s.numChildren() }));
+        }
+      }) : null;
     });
-    return () => unsubs.forEach((u) => { if (typeof u === 'function') u(); });
+    return () => {
+      unsubs.forEach((u) => {
+        if (typeof u === 'function') {
+          try { u(); } catch (e) { /* ignore */ }
+        }
+      });
+    };
   }, [uid]);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
+      if (!uid) return;
       try {
         const q = own
           ? query(collection(firestore, 'blogs'), where('uid', '==', uid))
           : query(collection(firestore, 'blogs'), where('uid', '==', uid), where('visibility', '==', 'public'));
         const snap = await getDocs(q);
-        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        items.sort((a, b) => ((b.server_ts && b.server_ts.toMillis ? b.server_ts.toMillis() : 0) - (a.server_ts && a.server_ts.toMillis ? a.server_ts.toMillis() : 0)));
+        if (!alive) return;
+        const items = (snap && snap.docs ? snap.docs : []).map((d) => ({ id: d.id, ...(d && typeof d.data === 'function' ? d.data() : {}) }));
+        items.sort((a, b) => {
+          const aTs = a && a.server_ts && typeof a.server_ts.toMillis === 'function' ? a.server_ts.toMillis() : (a && typeof a.server_ts === 'number' ? a.server_ts : 0);
+          const bTs = b && b.server_ts && typeof b.server_ts.toMillis === 'function' ? b.server_ts.toMillis() : (b && typeof b.server_ts === 'number' ? b.server_ts : 0);
+          return bTs - aTs;
+        });
         setPosts(items);
-      } catch (e) { reportError(e, 'profile-posts'); setPosts([]); }
+      } catch (e) {
+        if (alive) {
+          reportError(e, 'profile-posts');
+          setPosts([]);
+        }
+      }
     })();
+    return () => { alive = false; };
   }, [uid, own]);
 
   const act = async (fn) => {
@@ -88,14 +112,22 @@ export default function ProfileScreen({ route, navigation }) {
 
   useEffect(() => {
     if (own && navigation && typeof navigation.setOptions === 'function') {
-      navigation.setOptions({ headerRight: () => <TouchableOpacity onPress={() => navigation.navigate('Settings')}><Ionicons name="settings-outline" size={24} color={theme.primaryText} /></TouchableOpacity> });
+      try {
+        navigation.setOptions({
+          headerRight: () => (
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
+              <Ionicons name="settings-outline" size={24} color={theme.primaryText} />
+            </TouchableOpacity>
+          ),
+        });
+      } catch (e) { /* ignore */ }
     }
   }, [own, navigation, theme]);
 
   if (user === undefined) return <Loading />;
   if (user === null) return <Empty text="This profile could not be found." />;
 
-  const Header = (
+  const renderHeader = () => (
     <View style={{ padding: 18, alignItems: 'center' }}>
       <Avatar user={user} size={96} online={online} />
       <AppText bold size={22} style={{ marginTop: 10 }}>{userDisplayName(user)}</AppText>
@@ -132,8 +164,12 @@ export default function ProfileScreen({ route, navigation }) {
       <FlatList
         data={posts}
         keyExtractor={(p, i) => String((p && p.id) || i)}
-        ListHeaderComponent={Header}
-        renderItem={({ item }) => <ErrorBoundary compact name="profile-post"><BlogCard post={item} navigation={navigation} showAuthor={false} /></ErrorBoundary>}
+        ListHeaderComponent={renderHeader}
+        renderItem={({ item }) => (
+          <ErrorBoundary compact name="profile-post">
+            <BlogCard post={item} navigation={navigation} showAuthor={false} />
+          </ErrorBoundary>
+        )}
         ListEmptyComponent={<AppText muted style={{ textAlign: 'center', padding: 20 }}>No posts yet.</AppText>}
         contentContainerStyle={{ paddingBottom: 30 }}
       />
