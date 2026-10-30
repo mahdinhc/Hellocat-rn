@@ -32,6 +32,6 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",
-    "@config-plugins/react-native-webrtc": "^15.0.2"
+    "@config-plugins/react-native-webrtc": "10.0.0"
   }
 }
