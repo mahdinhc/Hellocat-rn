@@ -93,6 +93,17 @@ export async function setupNotifications() {
         sound: settings.sound ? 'default' : null,
         enableVibrate: !!settings.vibrate,
       });
+
+      await Notifications.setNotificationChannelAsync('calls', {
+        name: 'Incoming Calls',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 500, 250, 500, 250, 500],
+        lightColor: '#22c55e',
+        sound: 'default',
+        enableVibrate: true,
+        bypassDnd: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      });
     }
     return true;
   } catch (e) {
@@ -286,6 +297,13 @@ export function listenForNotificationTaps(onOpenChat) {
       const req = resp && resp.notification && resp.notification.request;
       let d = req && req.content && req.content.data;
       if ((!d || !d.fid) && req && req.trigger && req.trigger.remoteMessage && req.trigger.remoteMessage.data) d = req.trigger.remoteMessage.data; // raw FCM push
+      
+      // If user tapped an incoming call notification, the app opens and callManager triggers immediately
+      if (d && d.type === 'incoming_call') {
+        if (d.callerId) onOpenChat({ fid: d.callerId, cid: isValidKey(d.cid) ? d.cid : undefined });
+        return;
+      }
+
       if (d && isValidKey(d.fid)) onOpenChat({ fid: d.fid, cid: isValidKey(d.cid) ? d.cid : undefined });
     } catch (e) { /* ignore */ }
   };
