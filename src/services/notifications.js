@@ -17,7 +17,15 @@ import { userDisplayName } from '../utils';
 
 const SETTINGS_KEY = 'notif-settings-v1';
 const CHANNEL_ID = 'messages';
-const DEFAULTS = { enabled: true, preview: true, sound: true, vibrate: true };
+const DEFAULTS = {
+  enabled: true,
+  preview: true,
+  sound: true,
+  vibrate: true,
+  callsEnabled: true,
+  callSound: true,
+  callVibrate: true,
+};
 
 let Notifications = null;
 try { Notifications = require('expo-notifications'); } catch (e) { Notifications = null; }
@@ -96,11 +104,11 @@ export async function setupNotifications() {
 
       await Notifications.setNotificationChannelAsync('calls', {
         name: 'Incoming Calls',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 500, 250, 500, 250, 500],
+        importance: settings.callsEnabled ? Notifications.AndroidImportance.MAX : Notifications.AndroidImportance.NONE,
+        vibrationPattern: settings.callVibrate ? [0, 500, 250, 500, 250, 500] : [0],
         lightColor: '#22c55e',
-        sound: 'default',
-        enableVibrate: true,
+        sound: settings.callSound ? 'default' : null,
+        enableVibrate: !!settings.callVibrate,
         bypassDnd: true,
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
@@ -139,7 +147,11 @@ function syncPushPrefs() {
   try {
     if (!currentUid) return;
     const r = safeRef('push_prefs', currentUid);
-    if (r) set(r, { enabled: !!settings.enabled, preview: !!settings.preview }).catch(() => {});
+    if (r) set(r, {
+      enabled: !!settings.enabled,
+      preview: !!settings.preview,
+      callsEnabled: settings.callsEnabled !== false,
+    }).catch(() => {});
   } catch (e) { /* ignore */ }
 }
 

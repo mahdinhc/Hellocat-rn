@@ -8,6 +8,7 @@ import { RTCPeerConnection, RTCIceCandidate, RTCSessionDescription, mediaDevices
 import InCallManager from 'react-native-incall-manager';
 import { pushAndNotify } from './chat';
 import { notifyIncomingCallPush } from './pushNotify';
+import { getNotificationSettings } from './notifications';
 
 const ICE_SERVERS = {
   iceServers: [
@@ -153,10 +154,14 @@ class MobileCallManager {
     this.isSpeakerOn = isVideo; // Default video to speaker, audio to earpiece
     this.isFrontCamera = true;
 
-    // Start native Android ringtone & vibration
-    try {
-      InCallManager.startRingtone('_DEFAULT_');
-    } catch (e) {}
+    // Start native Android ringtone & vibration for incoming calls only (if enabled in settings)
+    const settings = getNotificationSettings();
+    if (settings.callsEnabled !== false && settings.callSound !== false) {
+      try {
+        InCallManager.stopRingback();
+        InCallManager.startRingtone('_DEFAULT_');
+      } catch (e) {}
+    }
 
     if (this.ringTimeout) clearTimeout(this.ringTimeout);
     this.ringTimeout = setTimeout(() => {
@@ -209,8 +214,9 @@ class MobileCallManager {
       logged: false,
     };
 
-    // Telephony audio session: start ringback tone & audio routing
+    // Telephony audio session: start ringback tone & audio routing for outgoing call
     try {
+      InCallManager.stopRingtone(); // Ensure incoming ringtone is never playing
       InCallManager.start({ media: callType });
       InCallManager.startRingback('_DEFAULT_');
       InCallManager.setSpeakerphoneOn(this.isSpeakerOn);

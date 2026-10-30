@@ -80,10 +80,13 @@ export default {
       if (callId && targetUid) {
         if (!isKey(callId) || !isKey(targetUid) || targetUid === caller) return reply(400);
 
-        const [tokens, sender] = await Promise.all([
+        const [tokens, prefs, sender] = await Promise.all([
           dbGet(env, `fcm_tokens/${targetUid}`, tok),
+          dbGet(env, `push_prefs/${targetUid}`, tok),
           dbGet(env, `users/${caller}`, tok),
         ]);
+
+        if (prefs && prefs.callsEnabled === false) return reply(200, { skipped: true, reason: 'calls_disabled' });
 
         const list = tokens && typeof tokens === 'object' ? Object.keys(tokens) : [];
         if (!list.length) return reply(200, { sent: 0, reason: 'no_tokens' });

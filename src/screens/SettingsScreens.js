@@ -202,7 +202,9 @@ export function SettingsNotificationsScreen() {
       }
       const next = await saveNotificationSettings(patch);
       setSt({ ...next });
-      if ('sound' in patch || 'vibrate' in patch) setupNotifications();
+      if ('sound' in patch || 'vibrate' in patch || 'callsEnabled' in patch || 'callSound' in patch || 'callVibrate' in patch) {
+        setupNotifications();
+      }
     } catch (e) { /* settings must never crash the app */ }
   };
 
@@ -224,11 +226,22 @@ export function SettingsNotificationsScreen() {
   return (
     <Screen>
       <ScrollView>
+        <View style={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 6 }}>
+          <AppText bold size={13} muted>MESSAGES</AppText>
+        </View>
         <Toggle label="Message notifications" hint="Get notified when anyone sends you a message" k="enabled" />
         <Toggle label="Show message preview" hint="Turn off to hide the message text in notifications" k="preview" disabled={!st.enabled} />
-        <Toggle label="Sound" k="sound" disabled={!st.enabled} />
-        <Toggle label="Vibrate" k="vibrate" disabled={!st.enabled} />
-        {!allowed && st.enabled ? (
+        <Toggle label="Message Sound" k="sound" disabled={!st.enabled} />
+        <Toggle label="Message Vibrate" k="vibrate" disabled={!st.enabled} />
+
+        <View style={{ paddingHorizontal: 18, paddingTop: 20, paddingBottom: 6 }}>
+          <AppText bold size={13} muted>CALLS</AppText>
+        </View>
+        <Toggle label="Call notifications" hint="Get notified and wake screen for incoming voice & video calls" k="callsEnabled" />
+        <Toggle label="Ringtone" hint="Play ringtone during incoming calls" k="callSound" disabled={!st.callsEnabled} />
+        <Toggle label="Call Vibrate" hint="Vibrate phone on incoming calls" k="callVibrate" disabled={!st.callsEnabled} />
+
+        {!allowed && (st.enabled || st.callsEnabled) ? (
           <AppText size={12} style={{ color: '#e5484d', padding: 18 }}>Android is currently blocking HelloCat notifications. Enable them in your phone's app settings.</AppText>
         ) : null}
         <View style={{ padding: 18 }}>
