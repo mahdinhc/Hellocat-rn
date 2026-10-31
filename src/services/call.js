@@ -155,6 +155,11 @@ class MobileCallManager {
       logged: false,
     };
 
+    // Notify caller that receiver device has received the call and is ringing
+    if (call.callId) {
+      update(ref(db, `calls/${call.callId}`), { status: 'ringing' }).catch(() => {});
+    }
+
     this.isSpeakerOn = isVideo; // Default video to speaker, audio to earpiece
     this.isFrontCamera = true;
 
@@ -218,11 +223,11 @@ class MobileCallManager {
       logged: false,
     };
 
-    // Telephony audio session: start ringback tone & audio routing for outgoing call
+    // Telephony audio session: DO NOT play any ringtone or ringback sound for the caller
     try {
-      InCallManager.stopRingtone(); // Ensure incoming ringtone is never playing
+      InCallManager.stopRingback();
+      InCallManager.stopRingtone();
       InCallManager.start({ media: callType });
-      InCallManager.startRingback('_DEFAULT_');
       InCallManager.setSpeakerphoneOn(this.isSpeakerOn);
       InCallManager.setKeepScreenOn(true);
     } catch (e) {}
@@ -299,7 +304,7 @@ class MobileCallManager {
         callerId: uid,
         receiverId: fid,
         type: callType,
-        status: 'ringing',
+        status: 'calling',
         offer: { type: offer.type, sdp: offer.sdp },
         timestamp: Date.now(),
       });
