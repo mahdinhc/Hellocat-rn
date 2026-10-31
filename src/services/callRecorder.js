@@ -91,23 +91,46 @@ class CallRecorderService {
     if (!isAct || this.isRecording) return;
 
     try {
-      const audioPerm = await Audio.getPermissionsAsync();
-      if (!audioPerm.granted) return;
-
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
-      });
+        staysActiveInBackground: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      }).catch(() => {});
 
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync({
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+        },
+        ios: {
+          extension: '.m4a',
+          audioQuality: Audio.IOSAudioQuality.HIGH,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {},
+      });
+      await recording.startAsync();
+
       this.recording = recording;
       this.isRecording = true;
       this.activeCallId = callId;
       console.log('[CallRecorder] Started recording for call:', callId);
     } catch (e) {
       console.warn('[CallRecorder start error]', e);
+      this.isRecording = false;
+      this.recording = null;
     }
   }
 
@@ -118,9 +141,12 @@ class CallRecorderService {
       this.recording = null;
       this.isRecording = false;
 
-      await rec.stopAndUnloadAsync();
-      const uri = rec.getURI();
+      const status = await rec.getStatusAsync().catch(() => null);
+      if (status && status.canRecord) {
+        await rec.stopAndUnloadAsync();
+      }
 
+      const uri = rec.getURI();
       if (!uri) return null;
 
       // Ensure directory exists in document/accessible directory
@@ -134,18 +160,6 @@ class CallRecorderService {
       const destPath = `${targetDir}Call_${this.activeCallId || dateStr}_${dateStr}.m4a`;
       await FileSystem.copyAsync({ from: uri, to: destPath });
       console.log('[CallRecorder] Successfully saved call to:', destPath);
-
-      // Also copy to external storage directory on Android if available
-      try {
-        const extDir = `${FileSystem.cacheDirectory}Hellocat/Racordig/`;
-        const extDirInfo = await FileSystem.getInfoAsync(extDir);
-        if (!extDirInfo.exists) {
-          await FileSystem.makeDirectoryAsync(extDir, { intermediates: true });
-        }
-        await FileSystem.copyAsync({ from: uri, to: `${extDir}Call_${this.activeCallId || dateStr}_${dateStr}.m4a` });
-      } catch (ex) {
-        // ignore secondary copy
-      }
 
       return destPath;
     } catch (e) {

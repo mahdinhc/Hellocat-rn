@@ -513,7 +513,7 @@ class MobileCallManager {
         if (this.activeCall) this.activeCall.status = 'connected';
         this.startTimer();
         this.notifySubscribers();
-        callRecorder.startRecording(callId).catch(() => {});
+        callRecorder.startRecording(callKey).catch(() => {});
       } else if (call.status === 'ringing') {
         if (this.activeCall && this.activeCall.isCaller && this.activeCall.status !== 'ringing') {
           this.activeCall.status = 'ringing';
