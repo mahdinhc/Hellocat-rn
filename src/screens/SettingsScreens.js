@@ -306,8 +306,9 @@ export function SettingsDeveloperScreen() {
   }, []);
 
   const onToggleRecord = async (v) => {
-    setRecordEnabled(v);
-    await callRecorder.setEnabled(v);
+    const success = await callRecorder.setEnabled(v);
+    setRecordEnabled(success);
+    refreshRecordings();
   };
 
   const shareRecording = async (rec) => {

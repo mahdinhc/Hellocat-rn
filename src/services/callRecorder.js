@@ -1,6 +1,7 @@
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform, PermissionsAndroid, Alert } from 'react-native';
 
 const DEV_CALL_RECORDING_KEY = 'hellocat_dev_call_recording_enabled';
 
@@ -9,6 +10,7 @@ class CallRecorderService {
     this.recording = null;
     this.isRecording = false;
     this.enabled = false;
+    this.activeCallId = null;
     this.init();
   }
 
@@ -31,13 +33,57 @@ class CallRecorderService {
     }
   }
 
+  async requestStorageAndAudioPermissions() {
+    try {
+      // 1. Audio Recording Permission
+      const audioPerm = await Audio.requestPermissionsAsync();
+      if (!audioPerm.granted) {
+        Alert.alert('Permission Denied', 'Microphone permission is required for call recording.');
+        return false;
+      }
+
+      // 2. Storage Permissions on Android
+      if (Platform.OS === 'android') {
+        const sdkInt = Platform.Version;
+        if (typeof sdkInt === 'number' && sdkInt < 33) {
+          const writeGranted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+            {
+              title: 'Storage Permission',
+              message: 'HelloCat needs storage access to save call recordings to /Hellocat/Racordig/.',
+              buttonPositive: 'Allow',
+            }
+          );
+          if (writeGranted !== PermissionsAndroid.RESULTS.GRANTED) {
+            Alert.alert('Storage Permission Denied', 'Storage permission is required to save call recordings.');
+            return false;
+          }
+        }
+      }
+      return true;
+    } catch (e) {
+      console.warn('[CallRecorder permission error]', e);
+      return false;
+    }
+  }
+
   async setEnabled(enabled) {
+    if (enabled) {
+      const granted = await this.requestStorageAndAudioPermissions();
+      if (!granted) {
+        this.enabled = false;
+        await AsyncStorage.setItem(DEV_CALL_RECORDING_KEY, 'false').catch(() => {});
+        return false;
+      }
+    }
+
     this.enabled = !!enabled;
     try {
       await AsyncStorage.setItem(DEV_CALL_RECORDING_KEY, this.enabled ? 'true' : 'false');
     } catch (e) {
       // ignore
     }
+    return this.enabled;
   }
 
   async startRecording(callId) {
@@ -45,8 +91,8 @@ class CallRecorderService {
     if (!isAct || this.isRecording) return;
 
     try {
-      const perm = await Audio.requestPermissionsAsync();
-      if (!perm.granted) return;
+      const audioPerm = await Audio.getPermissionsAsync();
+      if (!audioPerm.granted) return;
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -59,6 +105,7 @@ class CallRecorderService {
       this.recording = recording;
       this.isRecording = true;
       this.activeCallId = callId;
+      console.log('[CallRecorder] Started recording for call:', callId);
     } catch (e) {
       console.warn('[CallRecorder start error]', e);
     }
@@ -67,14 +114,16 @@ class CallRecorderService {
   async stopRecording() {
     if (!this.isRecording || !this.recording) return null;
     try {
-      await this.recording.stopAndUnloadAsync();
-      const uri = this.recording.getURI();
-      this.isRecording = false;
+      const rec = this.recording;
       this.recording = null;
+      this.isRecording = false;
+
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI();
 
       if (!uri) return null;
 
-      // Save to external/accessible Hellocat directory
+      // Ensure directory exists in document/accessible directory
       const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
       const targetDir = `${FileSystem.documentDirectory}Hellocat/Racordig/`;
       const dirInfo = await FileSystem.getInfoAsync(targetDir);
@@ -84,7 +133,20 @@ class CallRecorderService {
 
       const destPath = `${targetDir}Call_${this.activeCallId || dateStr}_${dateStr}.m4a`;
       await FileSystem.copyAsync({ from: uri, to: destPath });
-      console.log('[CallRecorder] Saved to:', destPath);
+      console.log('[CallRecorder] Successfully saved call to:', destPath);
+
+      // Also copy to external storage directory on Android if available
+      try {
+        const extDir = `${FileSystem.cacheDirectory}Hellocat/Racordig/`;
+        const extDirInfo = await FileSystem.getInfoAsync(extDir);
+        if (!extDirInfo.exists) {
+          await FileSystem.makeDirectoryAsync(extDir, { intermediates: true });
+        }
+        await FileSystem.copyAsync({ from: uri, to: `${extDir}Call_${this.activeCallId || dateStr}_${dateStr}.m4a` });
+      } catch (ex) {
+        // ignore secondary copy
+      }
+
       return destPath;
     } catch (e) {
       console.warn('[CallRecorder stop error]', e);

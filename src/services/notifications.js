@@ -198,8 +198,20 @@ async function present(title, body, data) {
   if (!Notifications || !settings.enabled) return;
   if (!(await hasPermission())) return;
   try {
+    const cid = (data && data.cid) || 'general';
     await Notifications.scheduleNotificationAsync({
-      content: { title, body, data: data || {}, sound: settings.sound ? 'default' : false, color: '#5d8ffc' },
+      content: {
+        title,
+        body,
+        data: data || {},
+        sound: settings.sound ? 'default' : false,
+        color: '#5d8ffc',
+        // Group & stack notifications by chat conversation on Android to prevent clutter
+        ...(Platform.OS === 'android' ? {
+          tag: `chat_${cid}`,
+          badge: 1,
+        } : {}),
+      },
       trigger: Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null,
     });
   } catch (e) { reportError(e, 'present-notification'); }

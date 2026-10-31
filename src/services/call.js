@@ -434,6 +434,7 @@ class MobileCallManager {
       this.startTimer();
       this.listenToCallSession(callKey);
       this.notifySubscribers();
+      callRecorder.startRecording(callKey).catch(() => {});
     } catch (e) {
       console.warn('Error accepting call:', e);
       this.cleanup();
@@ -644,6 +645,7 @@ class MobileCallManager {
   }
 
   cleanup() {
+    callRecorder.stopRecording().catch(() => {});
     const duration = this.callDurationSec || 0;
     const savedCall = this.activeCall ? { ...this.activeCall } : null;
 

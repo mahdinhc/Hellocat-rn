@@ -251,13 +251,8 @@ export default function ChatScreen({ route, navigation }) {
     if (textToCopy) {
       buttons.push({
         text: 'Copy Text',
-        onPress: async () => {
-          try {
-            await Clipboard.setStringAsync(textToCopy);
-            Alert.alert('Copied', 'Message copied to clipboard');
-          } catch (e) {
-            Alert.alert('Error', 'Could not copy message');
-          }
+        onPress: () => {
+          Clipboard.setStringAsync(textToCopy).catch(() => {});
         },
       });
     }

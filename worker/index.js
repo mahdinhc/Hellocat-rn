@@ -165,7 +165,14 @@ export default {
               token: t,
               notification: { title, body: text },
               data: { fid: caller, cid },
-              android: { priority: 'HIGH', notification: { channel_id: 'messages', color: '#5d8ffc' } },
+              android: {
+                priority: 'HIGH',
+                notification: {
+                  channel_id: 'messages',
+                  color: '#5d8ffc',
+                  tag: `chat_${cid}`,
+                },
+              },
             },
           }),
         });
