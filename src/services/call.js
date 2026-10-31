@@ -7,6 +7,7 @@ import { db, auth } from '../firebase';
 import { RTCPeerConnection, RTCIceCandidate, RTCSessionDescription, mediaDevices } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
 import { pushAndNotify } from './chat';
+import { callRecorder } from './callRecorder';
 import { notifyIncomingCallPush } from './pushNotify';
 import { getNotificationSettings } from './notifications';
 
@@ -506,6 +507,7 @@ class MobileCallManager {
         if (this.activeCall) this.activeCall.status = 'connected';
         this.startTimer();
         this.notifySubscribers();
+        callRecorder.startRecording(callId).catch(() => {});
       } else if (call.status === 'ringing') {
         if (this.activeCall && this.activeCall.isCaller && this.activeCall.status !== 'ringing') {
           this.activeCall.status = 'ringing';
@@ -616,6 +618,7 @@ class MobileCallManager {
 
   cleanupStateOnly() {
     this.stopTimer();
+    callRecorder.stopRecording().catch(() => {});
     if (this.disconnectTimer) {
       clearTimeout(this.disconnectTimer);
       this.disconnectTimer = null;

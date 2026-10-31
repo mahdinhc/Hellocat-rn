@@ -6,6 +6,7 @@ import { firestore } from '../firebase';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, Empty, Loading } from '../components/ui';
 import { BlogCard } from './BlogComponents';
+import { cacheBlogPosts, getCachedBlogPosts } from '../services/offlineStorage';
 
 const PAGE = 10;
 
@@ -28,15 +29,32 @@ export default function BlogsScreen({ navigation }) {
       const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       if (snap.docs.length) last.current = snap.docs[snap.docs.length - 1];
       setHasMore(snap.docs.length >= PAGE);
-      setPosts((prev) => (reset || !prev ? items : [...prev, ...items]));
+      setPosts((prev) => {
+        const next = reset || !prev ? items : [...prev, ...items];
+        cacheBlogPosts(next);
+        return next;
+      });
     } catch (e) {
+      if (reset) {
+        const cached = await getCachedBlogPosts();
+        if (cached && cached.length) {
+          setPosts(cached);
+          busy.current = false;
+          return;
+        }
+      }
       setPosts((prev) => prev || []);
       setHasMore(false);
     }
     busy.current = false;
   }, []);
 
-  useEffect(() => { load(true); }, [load]);
+  useEffect(() => {
+    getCachedBlogPosts().then((cached) => {
+      if (cached && cached.length) setPosts((curr) => (!curr || !curr.length ? cached : curr));
+    }).catch(() => {});
+    load(true);
+  }, [load]);
   useEffect(() => navigation.addListener('focus', () => { /* keep list, counters are live */ }), [navigation]);
 
   const refresh = async () => { setRefreshing(true); last.current = null; setHasMore(true); await load(true); setRefreshing(false); };

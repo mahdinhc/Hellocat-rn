@@ -9,6 +9,7 @@ import { getUser } from '../services/users';
 import { removeConversation } from '../services/chat';
 import { userDisplayName, timeAgo } from '../utils';
 import { safeRef, safeOnValue, normalizeMessage, isValidKey, str } from '../safe';
+import { cacheUserChats, getCachedUserChats } from '../services/offlineStorage';
 
 // m must be a normalized message (see safe.normalizeMessage) or null
 export function previewOf(m, uid) {
@@ -81,6 +82,15 @@ export default function ChatsScreen({ navigation }) {
   const [tsMap, setTsMap] = useState({});
 
   useEffect(() => {
+    if (!uid) return;
+    getCachedUserChats(uid).then((cached) => {
+      if (cached && Object.keys(cached).length) {
+        setChats((curr) => (!curr || !Object.keys(curr).length ? cached : curr));
+      }
+    }).catch(() => {});
+  }, [uid]);
+
+  useEffect(() => {
     const r = safeRef('chats', uid);
     if (!r) { setChats({}); return undefined; }
     return safeOnValue(
@@ -96,6 +106,7 @@ export default function ChatsScreen({ navigation }) {
           });
         }
         setChats(clean);
+        cacheUserChats(uid, clean);
       },
       () => setChats((c) => c || {}),
     );

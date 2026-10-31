@@ -15,6 +15,8 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import { safeRef, safeOnValue, normalizeMessage, isValidKey } from '../safe';
 import { setActiveChat } from '../services/notifications';
 import { callManager } from '../services/call';
+import { cacheChatMessages, getCachedChatMessages } from '../services/offlineStorage';
+import * as Clipboard from 'expo-clipboard';
 
 const PAGE = 40;
 
@@ -139,6 +141,16 @@ export default function ChatScreen({ route, navigation }) {
     return safeOnValue(r, (s) => setOnline(s.val() === 'online'));
   }, [fid]);
 
+  // Load cached offline messages first
+  useEffect(() => {
+    if (!cid) return;
+    getCachedChatMessages(cid).then((cached) => {
+      if (cached && cached.length) {
+        setMsgs((curr) => (!curr || curr.length === 0 ? cached : curr));
+      }
+    }).catch(() => {});
+  }, [cid]);
+
   useEffect(() => {
     const r = cid ? safeRef('chats_data', cid, 'messages') : null;
     if (!r) return undefined;
@@ -151,6 +163,7 @@ export default function ChatScreen({ route, navigation }) {
         const now = Date.now();
         list.sort((a, b) => (a.timestamp || now) - (b.timestamp || now));
         setMsgs(list);
+        cacheChatMessages(cid, list);
       },
       () => setMsgs((m) => m || []),
     );
@@ -233,7 +246,22 @@ export default function ChatScreen({ route, navigation }) {
   ]);
 
   const onLongPress = useCallback((m) => {
-    const buttons = [{ text: 'Reply', onPress: () => setReplyTo(m) }];
+    const buttons = [];
+    const textToCopy = m.data || m.filename || (m.type === 'call' ? (m.callType === 'video' ? 'Video Call' : 'Audio Call') : '');
+    if (textToCopy) {
+      buttons.push({
+        text: 'Copy Text',
+        onPress: async () => {
+          try {
+            await Clipboard.setStringAsync(textToCopy);
+            Alert.alert('Copied', 'Message copied to clipboard');
+          } catch (e) {
+            Alert.alert('Error', 'Could not copy message');
+          }
+        },
+      });
+    }
+    buttons.push({ text: 'Reply', onPress: () => setReplyTo(m) });
     if (m.send_from === uid && !m.removed) buttons.push({ text: 'Delete', style: 'destructive', onPress: () => { removeMessage(cid, m.key).catch(() => {}); } });
     buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert('Message', undefined, buttons);

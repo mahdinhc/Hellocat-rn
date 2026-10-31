@@ -15,15 +15,48 @@ import { getNotificationSettings, loadNotificationSettings, saveNotificationSett
 import { uploadLocalFile } from '../services/chat';
 import { invalidateUser } from '../services/users';
 import { validateName, formatDateTime } from '../utils';
+import { callRecorder } from '../services/callRecorder';
+import * as Sharing from 'expo-sharing';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const DEV_MODE_KEY = 'hellocat_dev_mode_unlocked';
 
 export function SettingsScreen({ navigation }) {
   const { signOut } = useAuth();
   const { theme } = useTheme();
-  const Item = ({ icon, label, to, onPress }) => (
+  const [devUnlocked, setDevUnlocked] = useState(false);
+  const [tapCount, setTapCount] = useState(0);
+  const tapTimeout = React.useRef(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(DEV_MODE_KEY).then((v) => {
+      if (v === 'true') setDevUnlocked(true);
+    }).catch(() => {});
+  }, []);
+
+  const onVersionPress = () => {
+    clearTimeout(tapTimeout.current);
+    const next = tapCount + 1;
+    setTapCount(next);
+
+    if (next >= 10) {
+      setDevUnlocked(true);
+      AsyncStorage.setItem(DEV_MODE_KEY, 'true').catch(() => {});
+      Alert.alert('Developer options enabled', 'Developer options are now unlocked in Settings.');
+      setTapCount(0);
+    } else {
+      tapTimeout.current = setTimeout(() => {
+        setTapCount(0);
+      }, 2500);
+    }
+  };
+
+  const Item = ({ icon, label, to, onPress, badge }) => (
     <TouchableOpacity onPress={onPress || (() => navigation.navigate(to))}>
       <Row style={{ paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010' }}>
         <Ionicons name={icon} size={22} color={theme.link} />
         <AppText style={{ marginLeft: 14, flex: 1 }}>{label}</AppText>
+        {badge ? <AppText size={11} style={{ marginRight: 8, color: '#eab308' }}>{badge}</AppText> : null}
         <Ionicons name="chevron-forward" size={18} color={theme.text} style={{ opacity: 0.4 }} />
       </Row>
     </TouchableOpacity>
@@ -35,8 +68,13 @@ export function SettingsScreen({ navigation }) {
       <Item icon="notifications-outline" label="Notifications" to="SettingsNotifications" />
       <Item icon="color-palette-outline" label="Theme" to="SettingsTheme" />
       <Item icon="time-outline" label="Login history" to="SettingsHistory" />
+      {devUnlocked ? (
+        <Item icon="code-slash-outline" label="Developer options" to="SettingsDeveloper" badge="DEV" />
+      ) : null}
       <Item icon="log-out-outline" label="Sign out" onPress={() => Alert.alert('Sign out?', undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} />
-      <AppText size={12} muted style={{ textAlign: 'center', marginTop: 24 }}>{APP_VERSION}</AppText>
+      <TouchableOpacity activeOpacity={0.7} onPress={onVersionPress} style={{ paddingVertical: 12 }}>
+        <AppText size={12} muted style={{ textAlign: 'center', marginTop: 12 }}>{APP_VERSION}</AppText>
+      </TouchableOpacity>
     </Screen>
   );
 }
@@ -248,6 +286,80 @@ export function SettingsNotificationsScreen() {
           <Button title="Send a test notification" secondary onPress={test} disabled={!st.enabled} />
           <AppText size={12} muted style={{ marginTop: 14 }}>You will not be notified for the chat you currently have open. If push is set up for this build, alerts also arrive when HelloCat is closed.</AppText>
         </View>
+      </ScrollView>
+    </Screen>
+  );
+}
+
+export function SettingsDeveloperScreen() {
+  const { theme } = useTheme();
+  const [recordEnabled, setRecordEnabled] = useState(false);
+  const [recordings, setRecordings] = useState([]);
+
+  const refreshRecordings = () => {
+    callRecorder.listRecordings().then(setRecordings).catch(() => setRecordings([]));
+  };
+
+  useEffect(() => {
+    callRecorder.isEnabled().then(setRecordEnabled).catch(() => {});
+    refreshRecordings();
+  }, []);
+
+  const onToggleRecord = async (v) => {
+    setRecordEnabled(v);
+    await callRecorder.setEnabled(v);
+  };
+
+  const shareRecording = async (rec) => {
+    try {
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(rec.uri);
+      } else {
+        Alert.alert('Recording Location', rec.uri);
+      }
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    }
+  };
+
+  return (
+    <Screen>
+      <ScrollView>
+        <View style={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 6 }}>
+          <AppText bold size={13} muted>EXPERIMENTAL FEATURES</AppText>
+        </View>
+
+        <Row style={{ paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010' }}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <AppText>Call Recording</AppText>
+            <AppText size={12} muted>Automatically record voice/video calls to /Hellocat/Racordig/</AppText>
+          </View>
+          <Switch value={recordEnabled} onValueChange={onToggleRecord} trackColor={{ true: theme.link, false: '#8885' }} thumbColor="#fff" />
+        </Row>
+
+        <View style={{ paddingHorizontal: 18, paddingTop: 20, paddingBottom: 6 }}>
+          <AppText bold size={13} muted>SAVED CALL RECORDINGS ({recordings.length})</AppText>
+        </View>
+
+        {recordings.length === 0 ? (
+          <AppText size={13} muted style={{ paddingHorizontal: 18, paddingVertical: 12 }}>
+            No recordings found yet in /Hellocat/Racordig/.
+          </AppText>
+        ) : (
+          recordings.map((rec, i) => (
+            <TouchableOpacity key={i} onPress={() => shareRecording(rec)}>
+              <Row style={{ paddingHorizontal: 18, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010' }}>
+                <Ionicons name="mic-circle-outline" size={26} color={theme.link} />
+                <View style={{ marginLeft: 12, flex: 1 }}>
+                  <AppText size={13} numberOfLines={1}>{rec.name}</AppText>
+                  <AppText size={11} muted>Tap to play or export</AppText>
+                </View>
+                <Ionicons name="share-outline" size={20} color={theme.text} style={{ opacity: 0.6 }} />
+              </Row>
+            </TouchableOpacity>
+          ))
+        )}
       </ScrollView>
     </Screen>
   );
