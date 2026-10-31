@@ -5,7 +5,7 @@ import { makeChatId, randomString } from '../utils';
 import { notifyPush } from './pushNotify';
 
 // push() returns a promise-like ref; once the server has the message, ask the worker to send the push.
-function pushAndNotify(cid, data) {
+export function pushAndNotify(cid, data) {
   const p = push(ref(db, `chats_data/${cid}/messages`), data);
   p.then(() => notifyPush(cid, p.key)).catch(() => {});
   return p;

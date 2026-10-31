@@ -2,7 +2,7 @@
 // Matches web call signaling over Firebase Realtime Database + Metered TURN servers
 // Full telephony hardware integration: InCallManager (Earpiece, Speakerphone, Bluetooth, Proximity Sensor, Camera flip)
 
-import { ref, set, update, get, onValue, off, push } from 'firebase/database';
+import { ref, set, update, get, onValue, off, push, serverTimestamp } from 'firebase/database';
 import { db, auth } from '../firebase';
 import { RTCPeerConnection, RTCIceCandidate, RTCSessionDescription, mediaDevices } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
@@ -55,6 +55,8 @@ class MobileCallManager {
     this.isVideoOff = false;
     this.isSpeakerOn = false;
     this.isFrontCamera = true;
+    this.isReconnecting = false;
+    this.disconnectTimer = null;
 
     // Listeners for UI state updates
     this.subscribers = new Set();
@@ -80,6 +82,7 @@ class MobileCallManager {
       isVideoOff: this.isVideoOff,
       isSpeakerOn: this.isSpeakerOn,
       isFrontCamera: this.isFrontCamera,
+      isReconnecting: this.isReconnecting,
       localStream: this.localStream,
       remoteStream: this.remoteStream,
     };
@@ -256,7 +259,25 @@ class MobileCallManager {
       this.peerConnection.onconnectionstatechange = () => {
         if (!this.peerConnection) return;
         const st = this.peerConnection.connectionState;
-        if (st === 'disconnected' || st === 'failed' || st === 'closed') {
+        if (st === 'connected') {
+          if (this.disconnectTimer) {
+            clearTimeout(this.disconnectTimer);
+            this.disconnectTimer = null;
+          }
+          this.isReconnecting = false;
+          this.notifySubscribers();
+        } else if (st === 'disconnected') {
+          // Temporary network drop / NAT migration - give up to 10 seconds to auto-reconnect ICE
+          this.isReconnecting = true;
+          this.notifySubscribers();
+          if (!this.disconnectTimer) {
+            this.disconnectTimer = setTimeout(() => {
+              if (this.activeCall && this.activeCall.status === 'connected') {
+                this.cleanup();
+              }
+            }, 10000);
+          }
+        } else if (st === 'failed' || st === 'closed') {
           if (this.activeCall && this.activeCall.status === 'connected') {
             this.cleanup();
           }
@@ -355,7 +376,25 @@ class MobileCallManager {
       this.peerConnection.onconnectionstatechange = () => {
         if (!this.peerConnection) return;
         const st = this.peerConnection.connectionState;
-        if (st === 'disconnected' || st === 'failed' || st === 'closed') {
+        if (st === 'connected') {
+          if (this.disconnectTimer) {
+            clearTimeout(this.disconnectTimer);
+            this.disconnectTimer = null;
+          }
+          this.isReconnecting = false;
+          this.notifySubscribers();
+        } else if (st === 'disconnected') {
+          // Temporary network drop / NAT migration - give up to 10 seconds to auto-reconnect ICE
+          this.isReconnecting = true;
+          this.notifySubscribers();
+          if (!this.disconnectTimer) {
+            this.disconnectTimer = setTimeout(() => {
+              if (this.activeCall && this.activeCall.status === 'connected') {
+                this.cleanup();
+              }
+            }, 10000);
+          }
+        } else if (st === 'failed' || st === 'closed') {
           if (this.activeCall && this.activeCall.status === 'connected') {
             this.cleanup();
           }
@@ -467,6 +506,11 @@ class MobileCallManager {
         if (this.activeCall) this.activeCall.status = 'connected';
         this.startTimer();
         this.notifySubscribers();
+      } else if (call.status === 'ringing') {
+        if (this.activeCall && this.activeCall.isCaller && this.activeCall.status !== 'ringing') {
+          this.activeCall.status = 'ringing';
+          this.notifySubscribers();
+        }
       } else if (call.status === 'rejected' || call.status === 'busy' || call.status === 'no_answer' || call.status === 'missed' || call.status === 'ended') {
         this.cleanup();
       } else if (call.status === 'yield') {
@@ -560,7 +604,7 @@ class MobileCallManager {
         duration: durationSec || 0,
         send_from: callerId,
         send_to: receiverId,
-        timestamp: Date.now(),
+        timestamp: serverTimestamp(),
         isSeenByReceiver: false,
         reply_of: null,
         style: null,
@@ -572,6 +616,11 @@ class MobileCallManager {
 
   cleanupStateOnly() {
     this.stopTimer();
+    if (this.disconnectTimer) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
+    }
+    this.isReconnecting = false;
     try {
       InCallManager.stop();
       InCallManager.stopRingback();

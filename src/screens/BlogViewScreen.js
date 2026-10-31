@@ -2,14 +2,14 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { FlatList, View, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { doc, getDoc, deleteDoc } from 'firebase/firestore';
-import { ref, push, remove, runTransaction, serverTimestamp } from 'firebase/database';
+import { ref, push, set, remove, runTransaction, serverTimestamp } from 'firebase/database';
 import { safeRef, safeOnValue, str, isValidKey } from '../safe';
 import { firestore, db } from '../firebase';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText, Avatar, Row, Input, Loading, Empty } from '../components/ui';
 import { useUser } from '../services/users';
-import { userDisplayName, timeAgo } from '../utils';
+import { userDisplayName, timeAgo, formatNumber } from '../utils';
 import { BlogCard, RichText } from './BlogComponents';
 
 function CommentRow({ c, bid, indent, onReply, onDelete, navigation }) {

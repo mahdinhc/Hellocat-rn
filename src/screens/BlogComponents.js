@@ -66,7 +66,9 @@ export function toggleLike(id, uid, liked) {
   if (!uid || !isValidKey(id)) return Promise.resolve();
   const r = safeRef('blogs', id, 'reacts', uid);
   if (!r) return Promise.resolve();
-  return liked ? remove(r) : set(r, serverTimestamp());
+  return (liked ? remove(r) : set(r, serverTimestamp())).catch((err) => {
+    console.warn('[toggleLike error]', err);
+  });
 }
 
 export function BlogCard({ post, navigation, showAuthor = true, detail = false }) {

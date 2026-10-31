@@ -35,9 +35,14 @@ export default function CallModal() {
       {/* Top Bar with Timer and Speaker status */}
       <View style={styles.topBar}>
         <AppText style={styles.appName}>HELLOCAT CALL</AppText>
-        {isConnected && (
+        {isConnected && !callState.isReconnecting && (
           <View style={styles.timerBadge}>
             <AppText style={styles.timerText}>{formatTimer(callState.callDurationSec)}</AppText>
+          </View>
+        )}
+        {callState.isReconnecting && (
+          <View style={[styles.timerBadge, { backgroundColor: '#eab308' }]}>
+            <AppText style={styles.timerText}>Reconnecting...</AppText>
           </View>
         )}
       </View>
@@ -73,10 +78,14 @@ export default function CallModal() {
             {name}
           </AppText>
           <AppText style={styles.statusText}>
-            {isIncoming
+            {callState.isReconnecting
+              ? 'Reconnecting...'
+              : isIncoming
               ? `Incoming ${isVideo ? 'Video' : 'Audio'} Call...`
               : activeCall.status === 'calling'
               ? 'Calling...'
+              : activeCall.status === 'ringing'
+              ? 'Ringing...'
               : activeCall.status === 'connecting'
               ? 'Connecting...'
               : 'Connected'}
