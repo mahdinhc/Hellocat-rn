@@ -116,10 +116,13 @@ export default {
                 android: {
                   priority: 'HIGH',
                   notification: {
-                    channel_id: 'calls',
+                    channel_id: 'calls_v2',
                     color: '#22c55e',
-                    sound: 'default',
+                    sound: 'ringtone',
                     tag: `call_${callId}`,
+                    notification_priority: 'PRIORITY_MAX',
+                    sticky: true,
+                    visibility: 'PUBLIC',
                   },
                 },
               },

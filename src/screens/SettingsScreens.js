@@ -16,6 +16,7 @@ import { uploadLocalFile } from '../services/chat';
 import { invalidateUser } from '../services/users';
 import { validateName, formatDateTime } from '../utils';
 import { callRecorder } from '../services/callRecorder';
+import { BUILTIN_TONES, loadRingtone, getRingtone, setBuiltinRingtone, pickCustomRingtone, previewRingtone, stopRingtone } from '../services/ringtone';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -218,6 +219,20 @@ export function SettingsNotificationsScreen() {
   const { theme } = useTheme();
   const [st, setSt] = useState(getNotificationSettings());
   const [allowed, setAllowed] = useState(true);
+  const [tone, setTone] = useState(getRingtone());
+
+  useEffect(() => {
+    loadRingtone().then((c) => setTone({ ...c })).catch(() => {});
+    return () => { stopRingtone(); };
+  }, []);
+
+  const chooseTone = async (id) => {
+    await setBuiltinRingtone(id); setTone({ ...getRingtone() }); previewRingtone();
+  };
+  const chooseCustom = async () => {
+    try { const c = await pickCustomRingtone(); if (c) { setTone({ ...c }); previewRingtone(); } }
+    catch (e) { Alert.alert('Could not use that file', 'Pick a different audio file.'); }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -278,6 +293,29 @@ export function SettingsNotificationsScreen() {
         <Toggle label="Call notifications" hint="Get notified and wake screen for incoming voice & video calls" k="callsEnabled" />
         <Toggle label="Ringtone" hint="Play ringtone during incoming calls" k="callSound" disabled={!st.callsEnabled} />
         <Toggle label="Call Vibrate" hint="Vibrate phone on incoming calls" k="callVibrate" disabled={!st.callsEnabled} />
+
+        <View style={{ paddingHorizontal: 18, paddingTop: 20, paddingBottom: 6, opacity: st.callsEnabled ? 1 : 0.45 }}>
+          <AppText bold size={13} muted>CALL RINGTONE</AppText>
+        </View>
+        {BUILTIN_TONES.map((t) => (
+          <TouchableOpacity key={t.id} disabled={!st.callsEnabled} onPress={() => chooseTone(t.id)} style={{ opacity: st.callsEnabled ? 1 : 0.45 }}>
+            <Row style={{ paddingHorizontal: 18, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010' }}>
+              <Ionicons name={tone.id === t.id ? 'radio-button-on' : 'radio-button-off'} size={22} color={theme.link} />
+              <AppText style={{ marginLeft: 12, flex: 1 }}>{t.label}</AppText>
+              <Ionicons name="play-circle-outline" size={22} color={theme.text} style={{ opacity: 0.5 }} />
+            </Row>
+          </TouchableOpacity>
+        ))}
+        <TouchableOpacity disabled={!st.callsEnabled} onPress={chooseCustom} style={{ opacity: st.callsEnabled ? 1 : 0.45 }}>
+          <Row style={{ paddingHorizontal: 18, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010' }}>
+            <Ionicons name={tone.id === 'custom' ? 'radio-button-on' : 'radio-button-off'} size={22} color={theme.link} />
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <AppText>Custom ringtone…</AppText>
+              <AppText size={12} muted numberOfLines={1}>{tone.id === 'custom' && tone.customName ? tone.customName : 'Choose any audio file from your phone'}</AppText>
+            </View>
+            <Ionicons name="folder-open-outline" size={22} color={theme.text} style={{ opacity: 0.5 }} />
+          </Row>
+        </TouchableOpacity>
 
         {!allowed && (st.enabled || st.callsEnabled) ? (
           <AppText size={12} style={{ color: '#e5484d', padding: 18 }}>Android is currently blocking HelloCat notifications. Enable them in your phone's app settings.</AppText>

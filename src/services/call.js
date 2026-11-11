@@ -9,7 +9,9 @@ import InCallManager from 'react-native-incall-manager';
 import { pushAndNotify } from './chat';
 import { callRecorder } from './callRecorder';
 import { notifyIncomingCallPush } from './pushNotify';
-import { getNotificationSettings } from './notifications';
+import { AppState } from 'react-native';
+import { getNotificationSettings, presentIncomingCall, dismissIncomingCall } from './notifications';
+import { playRingtone, stopRingtone, loadRingtone } from './ringtone';
 
 const ICE_SERVERS = {
   iceServers: [
@@ -165,11 +167,13 @@ class MobileCallManager {
 
     // Start native Android ringtone & vibration for incoming calls only (if enabled in settings)
     const settings = getNotificationSettings();
-    if (settings.callsEnabled !== false && settings.callSound !== false) {
-      try {
-        InCallManager.stopRingback();
-        InCallManager.startRingtone('_DEFAULT_');
-      } catch (e) {}
+    if (settings.callsEnabled !== false) {
+      try { InCallManager.stopRingback(); } catch (e) {}
+      loadRingtone().then(() => playRingtone({
+        sound: settings.callSound !== false,
+        vibrate: settings.callVibrate !== false,
+      })).catch(() => {});
+      if (AppState.currentState !== 'active') presentIncomingCall(this.activeCall);
     }
 
     if (this.ringTimeout) clearTimeout(this.ringTimeout);
@@ -337,6 +341,8 @@ class MobileCallManager {
       this.ringTimeout = null;
     }
 
+    stopRingtone().catch(() => {});
+    dismissIncomingCall(this.activeCall.callId);
     try {
       InCallManager.stopRingtone();
       InCallManager.start({ media: this.activeCall.type });
@@ -630,6 +636,8 @@ class MobileCallManager {
       this.disconnectTimer = null;
     }
     this.isReconnecting = false;
+    stopRingtone().catch(() => {});
+    dismissIncomingCall(this.activeCall && this.activeCall.callId);
     try {
       InCallManager.stop();
       InCallManager.stopRingback();

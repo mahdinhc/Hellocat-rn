@@ -1,9 +1,80 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Image, Dimensions, Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, Image, Dimensions, Platform, Animated, Easing, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { RTCView } from 'react-native-webrtc';
 import { AppText } from './ui';
 import { callManager } from '../services/call';
+
+
+function PulseRing({ delay }) {
+  const v = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.delay(delay),
+      Animated.timing(v, { toValue: 1, duration: 2200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[styles.pulse, { opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 2.3] }) }] }]}
+    />
+  );
+}
+
+function IncomingCallScreen({ name, pic, isVideo }) {
+  const bounce = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(bounce, { toValue: -10, duration: 450, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+      Animated.timing(bounce, { toValue: 0, duration: 450, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  const src = pic ? { uri: pic } : require('../../assets/blank-profile.png');
+  return (
+    <View style={styles.incomingRoot}>
+      <StatusBar barStyle="light-content" />
+      <Image source={src} style={StyleSheet.absoluteFill} blurRadius={Platform.OS === 'ios' ? 40 : 25} resizeMode="cover" />
+      <View style={styles.incomingShade} />
+      <View style={styles.incomingTop}>
+        <View style={styles.brandPill}>
+          <Ionicons name={isVideo ? 'videocam' : 'call'} size={13} color="#fff" />
+          <AppText style={styles.brandText}>HelloCat {isVideo ? 'video' : 'voice'} call</AppText>
+        </View>
+      </View>
+      <View style={styles.incomingMid}>
+        <View style={styles.pulseWrap}>
+          <PulseRing delay={0} />
+          <PulseRing delay={730} />
+          <PulseRing delay={1460} />
+          <Image source={src} style={styles.incomingAvatar} />
+        </View>
+        <AppText style={styles.incomingName} numberOfLines={2}>{name}</AppText>
+        <AppText style={styles.incomingSub}>Incoming {isVideo ? 'video' : 'voice'} call…</AppText>
+      </View>
+      <View style={styles.incomingBottom}>
+        <View style={styles.btnCol}>
+          <TouchableOpacity activeOpacity={0.8} style={[styles.bigBtn, { backgroundColor: '#ef4444' }]} onPress={() => callManager.rejectCall()}>
+            <Ionicons name="call" size={32} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+          </TouchableOpacity>
+          <AppText style={styles.bigLabel}>Decline</AppText>
+        </View>
+        <View style={styles.btnCol}>
+          <Animated.View style={{ transform: [{ translateY: bounce }] }}>
+            <TouchableOpacity activeOpacity={0.8} style={[styles.bigBtn, { backgroundColor: '#22c55e' }]} onPress={() => callManager.acceptCall()}>
+              <Ionicons name={isVideo ? 'videocam' : 'call'} size={32} color="#fff" />
+            </TouchableOpacity>
+          </Animated.View>
+          <AppText style={styles.bigLabel}>Accept</AppText>
+        </View>
+      </View>
+    </View>
+  );
+}
 
 export default function CallModal() {
   const [callState, setCallState] = useState(callManager.getState());
@@ -29,6 +100,8 @@ export default function CallModal() {
 
   const name = activeCall.friendName || activeCall.callerName || 'Friend';
   const pic = activeCall.friendPic || activeCall.callerPic;
+
+  if (isIncoming) return <View style={styles.overlay0}><IncomingCallScreen name={name} pic={pic} isVideo={isVideo} /></View>;
 
   return (
     <View style={styles.overlay}>
@@ -201,6 +274,21 @@ export default function CallModal() {
 const { width } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
+  overlay0: { ...StyleSheet.absoluteFillObject, zIndex: 999999, backgroundColor: '#0b1220' },
+  incomingRoot: { flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 60 : 48, paddingBottom: 64 },
+  incomingShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,12,24,0.68)' },
+  incomingTop: { width: '100%', alignItems: 'center' },
+  brandPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.14)', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 16 },
+  brandText: { color: '#fff', fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
+  incomingMid: { alignItems: 'center', paddingHorizontal: 30 },
+  pulseWrap: { width: 150, height: 150, alignItems: 'center', justifyContent: 'center', marginBottom: 34 },
+  pulse: { position: 'absolute', width: 150, height: 150, borderRadius: 75, backgroundColor: '#22c55e' },
+  incomingAvatar: { width: 150, height: 150, borderRadius: 75, borderWidth: 3, borderColor: 'rgba(255,255,255,0.9)', backgroundColor: '#1e293b' },
+  incomingName: { color: '#fff', fontSize: 32, fontWeight: '700', textAlign: 'center' },
+  incomingSub: { color: 'rgba(255,255,255,0.75)', fontSize: 16, marginTop: 8 },
+  incomingBottom: { width: '100%', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', paddingHorizontal: 30 },
+  bigBtn: { width: 74, height: 74, borderRadius: 37, alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  bigLabel: { color: '#fff', fontSize: 14, fontWeight: '600', marginTop: 10 },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#0f172a',

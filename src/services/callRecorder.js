@@ -11,6 +11,8 @@ class CallRecorderService {
     this.isRecording = false;
     this.enabled = false;
     this.activeCallId = null;
+    this.starting = false;
+    this.stopRequested = false;
     this.init();
   }
 
@@ -50,7 +52,7 @@ class CallRecorderService {
             PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
             {
               title: 'Storage Permission',
-              message: 'HelloCat needs storage access to save call recordings to /Hellocat/Racordig/.',
+              message: 'HelloCat needs storage access to save call recordings to Music/Hellocat Recordings.',
               buttonPositive: 'Allow',
             }
           );
@@ -88,84 +90,103 @@ class CallRecorderService {
 
   async startRecording(callId) {
     const isAct = await this.isEnabled();
-    if (!isAct || this.isRecording) return;
-
+    if (!isAct || this.isRecording || this.starting) return;
+    this.starting = true;
+    this.stopRequested = false;
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      }).catch(() => {});
+      // mic permission may have been revoked since the toggle was switched on
+      const perm = await Audio.getPermissionsAsync();
+      if (!perm.granted) {
+        const r = await Audio.requestPermissionsAsync();
+        if (!r.granted) return;
+      }
+      // Let WebRTC / InCallManager finish grabbing the audio session first; configuring expo-av at the
+      // same moment is what made recording fail before.
+      await new Promise((r) => setTimeout(r, 1500));
+      if (this.stopRequested) return;
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync({
-        android: {
-          extension: '.m4a',
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: '.m4a',
-          audioQuality: Audio.IOSAudioQuality.HIGH,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-        web: {},
-      });
-      await recording.startAsync();
+      // On Android do NOT touch the audio mode (it steals audio focus from the call); iOS needs it.
+      if (Platform.OS === 'ios') {
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, staysActiveInBackground: true }).catch(() => {});
+      }
 
+      const attempts = [
+        { sampleRate: 16000, numberOfChannels: 1, bitRate: 64000 },
+        { sampleRate: 44100, numberOfChannels: 1, bitRate: 96000 },
+        { sampleRate: 8000, numberOfChannels: 1, bitRate: 32000 },
+      ];
+      let recording = null;
+      for (const a of attempts) {
+        const rec = new Audio.Recording();
+        try {
+          await rec.prepareToRecordAsync({
+            isMeteringEnabled: false,
+            android: { extension: '.m4a', outputFormat: Audio.AndroidOutputFormat.MPEG_4, audioEncoder: Audio.AndroidAudioEncoder.AAC, ...a },
+            ios: { extension: '.m4a', outputFormat: Audio.IOSOutputFormat.MPEG4AAC, audioQuality: Audio.IOSAudioQuality.MEDIUM, ...a, linearPCMBitDepth: 16, linearPCMIsBigEndian: false, linearPCMIsFloat: false },
+            web: {},
+          });
+          await rec.startAsync();
+          recording = rec;
+          break;
+        } catch (e) {
+          console.warn('[CallRecorder] attempt failed', a.sampleRate, e && e.message);
+          try { await rec.stopAndUnloadAsync(); } catch (e2) {}
+        }
+      }
+      if (!recording) return;
+      if (this.stopRequested) {
+        try { await recording.stopAndUnloadAsync(); } catch (e) {}
+        return;
+      }
       this.recording = recording;
       this.isRecording = true;
       this.activeCallId = callId;
-      console.log('[CallRecorder] Started recording for call:', callId);
     } catch (e) {
       console.warn('[CallRecorder start error]', e);
       this.isRecording = false;
       this.recording = null;
+    } finally {
+      this.starting = false;
     }
   }
 
   async stopRecording() {
+    this.stopRequested = true;
     if (!this.isRecording || !this.recording) return null;
+    const rec = this.recording;
+    this.recording = null;
+    this.isRecording = false;
     try {
-      const rec = this.recording;
-      this.recording = null;
-      this.isRecording = false;
-
-      const status = await rec.getStatusAsync().catch(() => null);
-      if (status && status.canRecord) {
-        await rec.stopAndUnloadAsync();
-      }
-
+      try { await rec.stopAndUnloadAsync(); } catch (e) { /* already stopped */ }
       const uri = rec.getURI();
       if (!uri) return null;
 
-      // Ensure directory exists in document/accessible directory
       const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = `Call_${dateStr}.m4a`;
+
+      // App-private copy (always works, listed in Developer options)
       const targetDir = `${FileSystem.documentDirectory}Hellocat/Racordig/`;
       const dirInfo = await FileSystem.getInfoAsync(targetDir);
-      if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
-      }
-
-      const destPath = `${targetDir}Call_${this.activeCallId || dateStr}_${dateStr}.m4a`;
+      if (!dirInfo.exists) await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
+      const destPath = `${targetDir}${fileName}`;
       await FileSystem.copyAsync({ from: uri, to: destPath });
-      console.log('[CallRecorder] Successfully saved call to:', destPath);
 
+      // Also publish to the phone's public storage so it shows up in file managers / music apps
+      try {
+        const MediaLibrary = require('expo-media-library');
+        const p = await MediaLibrary.requestPermissionsAsync(true);
+        if (p.granted) {
+          const asset = await MediaLibrary.createAssetAsync(destPath);
+          const album = await MediaLibrary.getAlbumAsync('Hellocat Recordings');
+          if (album) await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+          else await MediaLibrary.createAlbumAsync('Hellocat Recordings', asset, false);
+        }
+      } catch (e) { /* optional */ }
+
+      FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
       return destPath;
     } catch (e) {
       console.warn('[CallRecorder stop error]', e);
-      this.isRecording = false;
-      this.recording = null;
       return null;
     }
   }

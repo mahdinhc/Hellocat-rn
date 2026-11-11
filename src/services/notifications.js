@@ -17,6 +17,8 @@ import { userDisplayName } from '../utils';
 
 const SETTINGS_KEY = 'notif-settings-v1';
 const CHANNEL_ID = 'messages';
+const CALL_CHANNEL = 'calls_v2';
+const CALL_CATEGORY = 'incoming_call';
 const DEFAULTS = {
   enabled: true,
   preview: true,
@@ -102,16 +104,24 @@ export async function setupNotifications() {
         enableVibrate: !!settings.vibrate,
       });
 
-      await Notifications.setNotificationChannelAsync('calls', {
+      try { await Notifications.deleteNotificationChannelAsync('calls'); } catch (e) { /* old channel */ }
+      await Notifications.setNotificationChannelAsync(CALL_CHANNEL, {
         name: 'Incoming Calls',
         importance: settings.callsEnabled ? Notifications.AndroidImportance.MAX : Notifications.AndroidImportance.NONE,
-        vibrationPattern: settings.callVibrate ? [0, 500, 250, 500, 250, 500] : [0],
+        vibrationPattern: settings.callVibrate ? [0, 700, 500, 700, 500, 700] : [0],
         lightColor: '#22c55e',
-        sound: settings.callSound ? 'default' : null,
+        sound: settings.callSound ? 'ringtone.wav' : null,
+        audioAttributes: { usage: Notifications.AndroidAudioUsage.NOTIFICATION_RINGTONE, contentType: Notifications.AndroidAudioContentType.SONIFICATION },
         enableVibrate: !!settings.callVibrate,
         bypassDnd: true,
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
+      try {
+        await Notifications.setNotificationCategoryAsync(CALL_CATEGORY, [
+          { identifier: 'call_accept', buttonTitle: 'Answer', options: { opensAppToForeground: true } },
+          { identifier: 'call_decline', buttonTitle: 'Decline', options: { opensAppToForeground: false, isDestructive: true } },
+        ]);
+      } catch (e) { /* ignore */ }
     }
     return true;
   } catch (e) {
@@ -215,6 +225,41 @@ async function present(title, body, data) {
       trigger: Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null,
     });
   } catch (e) { reportError(e, 'present-notification'); }
+}
+
+// Heads-up "incoming call" notification with Answer / Decline buttons (used when the app is not in front).
+export async function presentIncomingCall(call) {
+  if (!Notifications || settings.callsEnabled === false) return;
+  try {
+    if (!(await hasPermission())) return;
+    const isVideo = call.type === 'video';
+    await Notifications.scheduleNotificationAsync({
+      identifier: `call_${call.callId}`,
+      content: {
+        title: call.callerName || 'Friend',
+        body: `Incoming ${isVideo ? 'video' : 'voice'} call · HelloCat`,
+        data: { type: 'incoming_call', callId: call.callId, callerId: call.callerId, cid: call.cid || '' },
+        categoryIdentifier: CALL_CATEGORY,
+        sound: false,
+        color: '#22c55e',
+        priority: 'max',
+        sticky: true,
+        autoDismiss: false,
+      },
+      trigger: Platform.OS === 'android' ? { channelId: CALL_CHANNEL } : null,
+    });
+  } catch (e) { reportError(e, 'present-call'); }
+}
+
+export async function dismissIncomingCall(callId) {
+  if (!Notifications) return;
+  try {
+    if (callId) await Notifications.dismissNotificationAsync(`call_${callId}`);
+    else {
+      const list = await Notifications.getPresentedNotificationsAsync();
+      await Promise.all(list.filter((n) => n.request.content.data && n.request.content.data.type === 'incoming_call').map((n) => Notifications.dismissNotificationAsync(n.request.identifier)));
+    }
+  } catch (e) { /* ignore */ }
 }
 
 export async function sendTestNotification() {
@@ -324,7 +369,14 @@ export function listenForNotificationTaps(onOpenChat) {
       
       // If user tapped an incoming call notification, the app opens and callManager triggers immediately
       if (d && d.type === 'incoming_call') {
-        if (d.callerId) onOpenChat({ fid: d.callerId, cid: isValidKey(d.cid) ? d.cid : undefined });
+        // Answer / Decline buttons are handled by the call manager (the call UI is already shown by it)
+        const act = resp.actionIdentifier;
+        try {
+          const { callManager } = require('./call');
+          if (act === 'call_accept') callManager.acceptCall();
+          else if (act === 'call_decline') callManager.rejectCall();
+        } catch (e) { /* ignore */ }
+        dismissIncomingCall(d.callId);
         return;
       }
 
