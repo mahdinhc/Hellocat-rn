@@ -236,7 +236,7 @@ object CallRecEngine {
                 val v2 = ContentValues()
                 v2.put(MediaStore.MediaColumns.IS_PENDING, 0)
                 ctx.contentResolver.update(uri, v2, null, null)
-                return "$relPath/${f.name}"
+                return relPath + "/" + f.name
             }
         } catch (t: Throwable) {
             Log.w(TAG, "could not publish recording: " + t)
