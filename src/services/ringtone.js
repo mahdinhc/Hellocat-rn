@@ -3,16 +3,18 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Vibration, Platform } from 'react-native';
+import { Vibration, Platform, NativeModules } from 'react-native';
+
+const Native = NativeModules.CallRecorderNative;
 import InCallManager from 'react-native-incall-manager';
 
 const KEY = 'hellocat_ringtone_v1';
 
 export const BUILTIN_TONES = [
-  { id: 'hellocat', label: 'HelloCat (default)', src: require('../../assets/ringtones/hellocat.wav') },
-  { id: 'marimba', label: 'Marimba', src: require('../../assets/ringtones/marimba.wav') },
-  { id: 'classic', label: 'Classic Ring', src: require('../../assets/ringtones/classic.wav') },
-  { id: 'pulse', label: 'Synth Pulse', src: require('../../assets/ringtones/pulse.wav') },
+  { id: 'hellocat', raw: 'tone_hellocat', label: 'HelloCat (default)', src: require('../../assets/ringtones/hellocat.wav') },
+  { id: 'marimba', raw: 'tone_marimba', label: 'Marimba', src: require('../../assets/ringtones/marimba.wav') },
+  { id: 'classic', raw: 'tone_classic', label: 'Classic Ring', src: require('../../assets/ringtones/classic.wav') },
+  { id: 'pulse', raw: 'tone_pulse', label: 'Synth Pulse', src: require('../../assets/ringtones/pulse.wav') },
   { id: 'system', label: 'System ringtone', src: null },
 ];
 
@@ -63,6 +65,7 @@ export async function stopRingtone() {
   playing = false;
   try { Vibration.cancel(); } catch (e) {}
   try { InCallManager.stopRingtone(); } catch (e) {}
+  if (Native && Native.stopRingtone) { try { await Native.stopRingtone(); } catch (e) {} }
   const s = sound; sound = null;
   if (s) { try { await s.stopAsync(); } catch (e) {} try { await s.unloadAsync(); } catch (e) {} }
 }
@@ -72,6 +75,20 @@ export async function playRingtone({ vibrate = true, loop = true, sound: withSou
   playing = true;
   if (vibrate) { try { Vibration.vibrate([0, 700, 500, 700, 1500], true); } catch (e) {} }
   if (!withSound) return;
+  // Preferred: native player on the RING stream (ring volume, respects silent mode, like a phone call)
+  if (Platform.OS === 'android' && Native && Native.playRingtone) {
+    try {
+      let kind = 'system'; let value = '';
+      if (choice.id === 'custom' && choice.customUri) { kind = 'file'; value = choice.customUri; }
+      else {
+        const t = BUILTIN_TONES.find((x) => x.id === choice.id);
+        if (t && t.raw) { kind = 'raw'; value = t.raw; }
+      }
+      const ok = await Native.playRingtone(kind, value, !!loop);
+      if (ok) return;
+      if (kind !== 'system') { if (await Native.playRingtone('system', '', !!loop)) return; }
+    } catch (e) { /* fall through to expo-av */ }
+  }
   const src = currentSource();
   if (!src) { try { InCallManager.startRingtone('_DEFAULT_'); } catch (e) {} return; }
   try {
@@ -94,5 +111,5 @@ export async function playRingtone({ vibrate = true, loop = true, sound: withSou
 // Preview in settings (plays ~4s once, no vibration).
 export async function previewRingtone() {
   await playRingtone({ vibrate: false, loop: false });
-  setTimeout(() => { if (sound) stopRingtone(); }, 5000);
+  setTimeout(() => { stopRingtone(); }, 5000);
 }

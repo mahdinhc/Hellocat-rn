@@ -10,7 +10,8 @@ import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { THEMES } from '../theme/themes';
 import { Screen, AppText, Avatar, Row, Button, Input, Loading, Empty } from '../components/ui';
-import { Switch, Linking } from 'react-native';
+import { Switch, Linking, AppState } from 'react-native';
+import { Audio } from 'expo-av';
 import { getNotificationSettings, loadNotificationSettings, saveNotificationSettings, requestPermission, hasPermission, sendTestNotification, setupNotifications } from '../services/notifications';
 import { uploadLocalFile } from '../services/chat';
 import { invalidateUser } from '../services/users';
@@ -329,76 +330,189 @@ export function SettingsNotificationsScreen() {
   );
 }
 
+const fmtSize = (b) => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+const fmtDur = (ms) => { const t = Math.max(0, Math.round((ms || 0) / 1000)); const m = Math.floor(t / 60); const s2 = t % 60; return `${m}:${s2 < 10 ? '0' : ''}${s2}`; };
+const fmtWhen = (t) => { try { return new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } };
+
 export function SettingsDeveloperScreen() {
   const { theme } = useTheme();
   const [recordEnabled, setRecordEnabled] = useState(false);
   const [recordings, setRecordings] = useState([]);
+  const [storage, setStorage] = useState({ direct: false, needsAllFiles: false, path: '/Hellocat/Racordig' });
+  const [playing, setPlaying] = useState(null); // { uri, pos, dur, isPlaying }
+  const soundRef = React.useRef(null);
+  const [barW, setBarW] = useState(1);
 
-  const refreshRecordings = () => {
-    callRecorder.listRecordings().then(setRecordings).catch(() => setRecordings([]));
+  const refresh = async () => {
+    const list = await callRecorder.listRecordings().catch(() => []);
+    setRecordings(list);
+    const st = await callRecorder.storageStatus().catch(() => null);
+    if (st) setStorage(st);
+  };
+
+  const unloadSound = async () => {
+    const s = soundRef.current; soundRef.current = null;
+    if (s) { try { await s.stopAsync(); } catch (e) {} try { await s.unloadAsync(); } catch (e) {} }
   };
 
   useEffect(() => {
     callRecorder.isEnabled().then(setRecordEnabled).catch(() => {});
-    refreshRecordings();
+    refresh();
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') { refresh(); callRecorder.storageStatus().then((x) => { if (x && x.direct) callRecorder.publishAll(); }).catch(() => {}); }
+    });
+    return () => { sub.remove(); unloadSound(); };
   }, []);
 
   const onToggleRecord = async (v) => {
     const success = await callRecorder.setEnabled(v);
     setRecordEnabled(success);
-    refreshRecordings();
+    refresh();
   };
 
-  const shareRecording = async (rec) => {
+  const play = async (rec) => {
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(rec.uri);
-      } else {
-        Alert.alert('Recording Location', rec.uri);
+      if (playing && playing.uri === rec.uri && soundRef.current) {
+        const st = await soundRef.current.getStatusAsync();
+        if (st.isLoaded) { if (st.isPlaying) await soundRef.current.pauseAsync(); else await soundRef.current.playAsync(); return; }
       }
-    } catch (e) {
-      Alert.alert('Error', e.message);
-    }
+      await unloadSound();
+      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false, staysActiveInBackground: false, shouldDuckAndroid: true });
+      const { sound } = await Audio.Sound.createAsync({ uri: rec.uri }, { shouldPlay: true }, (st) => {
+        if (!st.isLoaded) return;
+        setPlaying({ uri: rec.uri, pos: st.positionMillis, dur: st.durationMillis || 0, isPlaying: st.isPlaying });
+        if (st.didJustFinish) { sound.setPositionAsync(0).catch(() => {}); sound.pauseAsync().catch(() => {}); }
+      });
+      soundRef.current = sound;
+    } catch (e) { Alert.alert('Could not play', 'This recording cannot be played.'); }
   };
+
+  const seek = async (rec, x) => {
+    if (!playing || playing.uri !== rec.uri || !soundRef.current || !playing.dur) return;
+    const ratio = Math.min(1, Math.max(0, x / barW));
+    try { await soundRef.current.setPositionAsync(Math.round(ratio * playing.dur)); } catch (e) {}
+  };
+
+  const shareRec = async (rec) => {
+    try {
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(rec.uri, { mimeType: rec.name.endsWith('.m4a') ? 'audio/mp4' : 'audio/x-wav' });
+      else Alert.alert('Recording location', rec.uri);
+    } catch (e) { Alert.alert('Error', e.message); }
+  };
+
+  const del = (rec) => {
+    Alert.alert('Delete recording?', rec.name, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        if (playing && playing.uri === rec.uri) { await unloadSound(); setPlaying(null); }
+        await callRecorder.deleteRecording(rec);
+        refresh();
+      } },
+    ]);
+  };
+
+  const delAll = () => {
+    if (!recordings.length) return;
+    Alert.alert('Delete all recordings?', `${recordings.length} recordings will be removed.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete all', style: 'destructive', onPress: async () => {
+        await unloadSound(); setPlaying(null);
+        for (const r of recordings) await callRecorder.deleteRecording(r);
+        refresh();
+      } },
+    ]);
+  };
+
+  const allowAllFiles = async () => {
+    Alert.alert('Allow file access', 'To save recordings in the /Hellocat/Racordig folder, turn on "Allow access to manage all files" for HelloCat on the next screen, then come back.', [
+      { text: 'Not now', style: 'cancel' },
+      { text: 'Open settings', onPress: () => { callRecorder.requestAllFilesAccess(); } },
+    ]);
+  };
+
+  const line = { borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010' };
+  const totalSize = recordings.reduce((a, r) => a + (r.size || 0), 0);
+  const folderText = storage.direct ? storage.path : 'Documents/Hellocat/Racordig';
 
   return (
     <Screen>
       <ScrollView>
         <View style={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 6 }}>
-          <AppText bold size={13} muted>EXPERIMENTAL FEATURES</AppText>
+          <AppText bold size={13} muted>CALL RECORDING</AppText>
         </View>
 
-        <Row style={{ paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010' }}>
+        <Row style={{ paddingHorizontal: 18, paddingVertical: 14, ...line }}>
           <View style={{ flex: 1, paddingRight: 12 }}>
-            <AppText>Call Recording</AppText>
-            <AppText size={12} muted>Automatically record voice/video calls to /Hellocat/Racordig/</AppText>
+            <AppText>Record calls</AppText>
+            <AppText size={12} muted>Records both sides of voice and video calls automatically</AppText>
           </View>
           <Switch value={recordEnabled} onValueChange={onToggleRecord} trackColor={{ true: theme.link, false: '#8885' }} thumbColor="#fff" />
         </Row>
 
-        <View style={{ paddingHorizontal: 18, paddingTop: 20, paddingBottom: 6 }}>
-          <AppText bold size={13} muted>SAVED CALL RECORDINGS ({recordings.length})</AppText>
+        <View style={{ paddingHorizontal: 18, paddingVertical: 14, ...line }}>
+          <Row>
+            <Ionicons name="folder-open-outline" size={22} color={theme.link} />
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <AppText>Saved to</AppText>
+              <AppText size={12} muted>{folderText}</AppText>
+            </View>
+          </Row>
+          {storage.needsAllFiles ? (
+            <View style={{ marginTop: 12 }}>
+              <AppText size={12} muted style={{ marginBottom: 8 }}>Android only allows the exact /Hellocat/Racordig folder with "All files access". Until you allow it, recordings go to Documents/Hellocat/Racordig.</AppText>
+              <Button title="Allow /Hellocat/Racordig folder" secondary onPress={allowAllFiles} />
+            </View>
+          ) : null}
         </View>
 
+        <Row style={{ paddingHorizontal: 18, paddingTop: 20, paddingBottom: 8 }}>
+          <View style={{ flex: 1 }}>
+            <AppText bold size={13} muted>RECORDINGS ({recordings.length}){recordings.length ? ` · ${fmtSize(totalSize)}` : ''}</AppText>
+          </View>
+          {recordings.length ? (
+            <TouchableOpacity onPress={delAll}><AppText size={13} style={{ color: '#e5484d' }}>Delete all</AppText></TouchableOpacity>
+          ) : null}
+        </Row>
+
         {recordings.length === 0 ? (
-          <AppText size={13} muted style={{ paddingHorizontal: 18, paddingVertical: 12 }}>
-            No recordings found yet in /Hellocat/Racordig/.
-          </AppText>
+          <View style={{ alignItems: 'center', paddingVertical: 36, paddingHorizontal: 30 }}>
+            <Ionicons name="mic-off-outline" size={38} color={theme.text} style={{ opacity: 0.3 }} />
+            <AppText size={13} muted style={{ marginTop: 10, textAlign: 'center' }}>No recordings yet. Turn on recording and make a call.</AppText>
+          </View>
         ) : (
-          recordings.map((rec, i) => (
-            <TouchableOpacity key={i} onPress={() => shareRecording(rec)}>
-              <Row style={{ paddingHorizontal: 18, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.dark ? '#ffffff15' : '#00000010' }}>
-                <Ionicons name="mic-circle-outline" size={26} color={theme.link} />
-                <View style={{ marginLeft: 12, flex: 1 }}>
-                  <AppText size={13} numberOfLines={1}>{rec.name}</AppText>
-                  <AppText size={11} muted>Tap to play or export</AppText>
-                </View>
-                <Ionicons name="share-outline" size={20} color={theme.text} style={{ opacity: 0.6 }} />
-              </Row>
-            </TouchableOpacity>
-          ))
+          recordings.map((rec) => {
+            const active = playing && playing.uri === rec.uri;
+            const isPlay = active && playing.isPlaying;
+            const ratio = active && playing.dur ? Math.min(1, playing.pos / playing.dur) : 0;
+            return (
+              <View key={rec.uri} style={{ paddingHorizontal: 18, paddingVertical: 12, ...line }}>
+                <Row>
+                  <TouchableOpacity onPress={() => play(rec)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name={isPlay ? 'pause-circle' : 'play-circle'} size={42} color={theme.link} />
+                  </TouchableOpacity>
+                  <View style={{ marginLeft: 12, flex: 1 }}>
+                    <AppText size={14} numberOfLines={1}>Call · {fmtWhen(rec.when)}</AppText>
+                    <AppText size={11} muted>{fmtSize(rec.size)} · {rec.name.split('.').pop().toUpperCase()}{active && playing.dur ? ` · ${fmtDur(playing.pos)} / ${fmtDur(playing.dur)}` : ''}</AppText>
+                  </View>
+                  <TouchableOpacity onPress={() => shareRec(rec)} style={{ padding: 8 }}>
+                    <Ionicons name="share-outline" size={20} color={theme.text} style={{ opacity: 0.7 }} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => del(rec)} style={{ padding: 8 }}>
+                    <Ionicons name="trash-outline" size={20} color="#e5484d" />
+                  </TouchableOpacity>
+                </Row>
+                {active ? (
+                  <TouchableOpacity activeOpacity={1} onPress={(e) => seek(rec, e.nativeEvent.locationX)} onLayout={(e) => setBarW(e.nativeEvent.layout.width || 1)} style={{ marginTop: 10, paddingVertical: 8 }}>
+                    <View style={{ height: 5, borderRadius: 3, backgroundColor: '#8885' }}>
+                      <View style={{ height: 5, borderRadius: 3, width: `${ratio * 100}%`, backgroundColor: theme.link }} />
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            );
+          })
         )}
+        <View style={{ height: 30 }} />
       </ScrollView>
     </Screen>
   );

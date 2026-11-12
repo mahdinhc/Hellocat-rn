@@ -1,7 +1,9 @@
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform, PermissionsAndroid, Alert } from 'react-native';
+import { Platform, PermissionsAndroid, Alert, NativeModules } from 'react-native';
+
+const Native = NativeModules.CallRecorderNative;
 
 const DEV_CALL_RECORDING_KEY = 'hellocat_dev_call_recording_enabled';
 
@@ -13,6 +15,7 @@ class CallRecorderService {
     this.activeCallId = null;
     this.starting = false;
     this.stopRequested = false;
+    this.native = false;
     this.init();
   }
 
@@ -52,7 +55,7 @@ class CallRecorderService {
             PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
             {
               title: 'Storage Permission',
-              message: 'HelloCat needs storage access to save call recordings to Music/Hellocat Recordings.',
+              message: 'HelloCat needs storage access to save call recordings to Music/Hellocat Recordings',
               buttonPositive: 'Allow',
             }
           );
@@ -105,6 +108,54 @@ class CallRecorderService {
       await new Promise((r) => setTimeout(r, 1500));
       if (this.stopRequested) return;
 
+      // 1) Preferred: native full-call recorder (your mic + the other person's voice mixed into one WAV)
+      if (Platform.OS === 'android' && Native) {
+        try {
+          if (await Native.isAvailable()) {
+            const dir = `${FileSystem.documentDirectory}Hellocat/Racordig/`;
+            const info = await FileSystem.getInfoAsync(dir);
+            if (!info.exists) await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const ok = await Native.start(`${dir}Call_${stamp}.wav`);
+            if (ok) {
+              this.native = true;
+              this.isRecording = true;
+              this.activeCallId = callId;
+              // If WebRTC never feeds us audio (module not hooked), fall back to the mic-only recorder.
+              setTimeout(async () => {
+                try {
+                  if (!this.native || !this.isRecording) return;
+                  const st = await Native.stats();
+                  if (!st || (st.mic <= 0 && st.spk <= 0)) {
+                    await Native.stop().catch(() => null);
+                    this.native = false;
+                    this.isRecording = false;
+                    this.stopRequested = false;
+                    this._startExpoAv(callId);
+                  }
+                } catch (e) { /* ignore */ }
+              }, 4000);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('[CallRecorder] native start failed', e && e.message);
+          this.native = false;
+        }
+      }
+      await this._startExpoAv(callId, true);
+    } catch (e) {
+      console.warn('[CallRecorder start error]', e);
+      this.isRecording = false;
+      this.recording = null;
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  // 2) Fallback: expo-av microphone-only recording
+  async _startExpoAv(callId) {
+    try {
       // On Android do NOT touch the audio mode (it steals audio focus from the call); iOS needs it.
       if (Platform.OS === 'ios') {
         await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, staysActiveInBackground: true }).catch(() => {});
@@ -142,16 +193,19 @@ class CallRecorderService {
       this.isRecording = true;
       this.activeCallId = callId;
     } catch (e) {
-      console.warn('[CallRecorder start error]', e);
+      console.warn('[CallRecorder expo-av error]', e);
       this.isRecording = false;
       this.recording = null;
-    } finally {
-      this.starting = false;
     }
   }
 
   async stopRecording() {
     this.stopRequested = true;
+    if (this.native) {
+      this.native = false;
+      this.isRecording = false;
+      try { return (await Native.stop()) || null; } catch (e) { return null; }
+    }
     if (!this.isRecording || !this.recording) return null;
     const rec = this.recording;
     this.recording = null;
@@ -171,19 +225,8 @@ class CallRecorderService {
       const destPath = `${targetDir}${fileName}`;
       await FileSystem.copyAsync({ from: uri, to: destPath });
 
-      // Also publish to the phone's public storage so it shows up in file managers / music apps
-      try {
-        const MediaLibrary = require('expo-media-library');
-        const p = await MediaLibrary.requestPermissionsAsync(true);
-        if (p.granted) {
-          const asset = await MediaLibrary.createAssetAsync(destPath);
-          const album = await MediaLibrary.getAlbumAsync('Hellocat Recordings');
-          if (album) await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-          else await MediaLibrary.createAlbumAsync('Hellocat Recordings', asset, false);
-        }
-      } catch (e) { /* optional */ }
-
       FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+      if (Platform.OS === 'android' && Native && Native.publishFile) Native.publishFile(destPath).catch(() => {});
       return destPath;
     } catch (e) {
       console.warn('[CallRecorder stop error]', e);
@@ -197,13 +240,52 @@ class CallRecorderService {
       const dirInfo = await FileSystem.getInfoAsync(targetDir);
       if (!dirInfo.exists) return [];
       const files = await FileSystem.readDirectoryAsync(targetDir);
-      return files.map((name) => ({
-        name,
-        uri: `${targetDir}${name}`,
-      }));
+      const out = [];
+      for (const name of files) {
+        if (!/\.(wav|m4a)$/i.test(name)) continue;
+        const uri = `${targetDir}${name}`;
+        let size = 0; let modified = 0;
+        try {
+          const i = await FileSystem.getInfoAsync(uri, { size: true });
+          size = i.size || 0; modified = (i.modificationTime || 0) * 1000;
+        } catch (e) { /* ignore */ }
+        // Call_2026-11-12T04-22-10-123Z.wav -> real timestamp
+        const m = name.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+        const when = m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : modified;
+        out.push({ name, uri, size, when });
+      }
+      out.sort((a, b) => b.when - a.when);
+      return out;
     } catch (e) {
       return [];
     }
+  }
+
+  async deleteRecording(rec) {
+    try { await FileSystem.deleteAsync(rec.uri, { idempotent: true }); } catch (e) { /* ignore */ }
+    if (Platform.OS === 'android' && Native && Native.deletePublic) { try { await Native.deletePublic(rec.name); } catch (e) { /* ignore */ } }
+  }
+
+  // Where recordings are copied on the phone, and whether the real /Hellocat/Racordig folder is reachable.
+  async storageStatus() {
+    if (Platform.OS === 'android' && Native && Native.storageStatus) {
+      try { return await Native.storageStatus(); } catch (e) { /* ignore */ }
+    }
+    return { direct: false, needsAllFiles: false, path: '/Hellocat/Racordig' };
+  }
+
+  async requestAllFilesAccess() {
+    if (Platform.OS === 'android' && Native && Native.requestAllFilesAccess) {
+      try { return await Native.requestAllFilesAccess(); } catch (e) { /* ignore */ }
+    }
+    return false;
+  }
+
+  // Copies every recording that is not yet in the public folder (used right after access is granted).
+  async publishAll() {
+    if (Platform.OS !== 'android' || !Native || !Native.publishFile) return;
+    const list = await this.listRecordings();
+    for (const r of list) { try { await Native.publishFile(r.uri); } catch (e) { /* ignore */ } }
   }
 }
 

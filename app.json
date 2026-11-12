@@ -33,7 +33,8 @@
         "WRITE_EXTERNAL_STORAGE",
         "READ_MEDIA_AUDIO",
         "USE_FULL_SCREEN_INTENT",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "MANAGE_EXTERNAL_STORAGE"
       ]
     },
     "plugins": [
@@ -55,13 +56,7 @@
           ]
         }
       ],
-      [
-        "expo-media-library",
-        {
-          "savePhotosPermission": "Save call recordings",
-          "isAccessMediaLocationEnabled": false
-        }
-      ]
+      "./plugins/withCallRecorder"
     ]
   }
 }
