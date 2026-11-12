@@ -62,6 +62,17 @@ export function unreactMessage(cid, mid, uid) {
   return remove(ref(db, `chats_data/${cid}/messages/${mid}/reacts/${uid}`));
 }
 
+
+export function saveMessageDoodle(cid, mid, dataUrl, pos = { top: 0, left: 0, width: 220, height: 180 }) {
+  return update(ref(db, `chats_data/${cid}/messages/${mid}`), {
+    doodle: { url: dataUrl, pos: pos },
+  });
+}
+
+export function deleteMessageDoodle(cid, mid) {
+  return remove(ref(db, `chats_data/${cid}/messages/${mid}/doodle`));
+}
+
 export function markSeen(cid, mid) {
   return update(ref(db, `chats_data/${cid}/messages/${mid}`), { isSeenByReceiver: true, seenByReceiverAt: serverTimestamp() }).catch(() => {});
 }

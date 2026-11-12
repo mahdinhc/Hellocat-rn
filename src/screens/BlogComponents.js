@@ -104,13 +104,14 @@ export function useBlogMeta(id) {
   const [meta, setMeta] = useState({ likes: 0, comments: 0, views: 0, mine: false });
   const { uid } = useAuth();
   useEffect(() => {
+    if (!id) return undefined;
     const r = safeRef('blogs', id);
     if (!r) return undefined;
     return safeOnValue(r, (s) => {
       const reacts = s.child('reacts');
       setMeta({
-        likes: reacts.numChildren(),
-        comments: s.child('comments').numChildren(),
+        likes: reacts.numChildren() || 0,
+        comments: s.child('comments').numChildren() || 0,
         views: Number(s.child('views').val()) || 0,
         mine: !!uid && reacts.child(uid).exists(),
       });
@@ -120,7 +121,7 @@ export function useBlogMeta(id) {
 }
 
 export function toggleLike(id, uid, liked) {
-  if (!uid || !isValidKey(id)) return Promise.resolve();
+  if (!uid || !id) return Promise.resolve();
   const r = safeRef('blogs', id, 'reacts', uid);
   if (!r) return Promise.resolve();
   return (liked ? remove(r) : set(r, serverTimestamp())).catch((err) => {
@@ -133,6 +134,26 @@ export function BlogCard({ post, navigation, showAuthor = true, detail = false }
   const { theme } = useTheme();
   const author = useUser(post.uid);
   const meta = useBlogMeta(post.id);
+  const [optimisticLiked, setOptimisticLiked] = useState(null);
+  const [optimisticDelta, setOptimisticDelta] = useState(0);
+
+  const isLiked = optimisticLiked !== null ? optimisticLiked : meta.mine;
+  const likeCount = Math.max(0, meta.likes + optimisticDelta);
+
+  // Sync back when meta updates
+  useEffect(() => {
+    setOptimisticLiked(null);
+    setOptimisticDelta(0);
+  }, [meta.mine, meta.likes]);
+
+  const onToggleLike = () => {
+    if (!uid) return;
+    const nextState = !isLiked;
+    setOptimisticLiked(nextState);
+    setOptimisticDelta(nextState ? (meta.mine ? 0 : 1) : (meta.mine ? -1 : 0));
+    toggleLike(post.id, uid, isLiked);
+  };
+
   const ts = post.server_ts && post.server_ts.toMillis ? post.server_ts.toMillis() : null;
   const open = () => { if (!detail) navigation.navigate('BlogView', { id: post.id }); };
   return (
@@ -152,18 +173,24 @@ export function BlogCard({ post, navigation, showAuthor = true, detail = false }
         <RichText text={post.caption} style={{ color: theme.cardText }} />
         <Attachments items={post.attachments} />
       </TouchableOpacity>
-      <Row style={{ marginTop: 12 }}>
-        <TouchableOpacity onPress={() => toggleLike(post.id, uid, meta.mine)} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 22 }}>
-          <Ionicons name={meta.mine ? 'heart' : 'heart-outline'} size={22} color={meta.mine ? '#e5484d' : theme.cardText} />
-          {meta.likes > 0 ? <AppText size={13} style={{ marginLeft: 6, color: theme.cardText }}>{formatNumber(meta.likes)}</AppText> : null}
+      <Row style={{ marginTop: 12, alignItems: 'center' }}>
+        <TouchableOpacity onPress={onToggleLike} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 22, paddingVertical: 4 }}>
+          <Ionicons name={isLiked ? 'heart' : 'heart-outline'} size={22} color={isLiked ? '#e5484d' : theme.cardText} />
+          <AppText size={13} style={{ marginLeft: 6, color: isLiked ? '#e5484d' : theme.cardText, fontWeight: isLiked ? '600' : '400' }}>
+            {formatNumber(likeCount)}
+          </AppText>
         </TouchableOpacity>
-        <TouchableOpacity onPress={open} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 22 }}>
+        <TouchableOpacity onPress={open} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 22, paddingVertical: 4 }}>
           <Ionicons name="chatbubble-outline" size={20} color={theme.cardText} />
-          {meta.comments > 0 ? <AppText size={13} style={{ marginLeft: 6, color: theme.cardText }}>{formatNumber(meta.comments)}</AppText> : null}
+          <AppText size={13} style={{ marginLeft: 6, color: theme.cardText }}>
+            {formatNumber(meta.comments || 0)}
+          </AppText>
         </TouchableOpacity>
-        <Row style={{ alignItems: 'center' }}>
+        <Row style={{ alignItems: 'center', paddingVertical: 4 }}>
           <Ionicons name="eye-outline" size={20} color={theme.cardText} style={{ opacity: 0.7 }} />
-          {meta.views > 0 ? <AppText size={13} muted style={{ marginLeft: 6 }}>{formatNumber(meta.views)}</AppText> : null}
+          <AppText size={13} muted style={{ marginLeft: 6 }}>
+            {formatNumber(meta.views || 0)}
+          </AppText>
         </Row>
       </Row>
     </Card>

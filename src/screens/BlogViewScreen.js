@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { FlatList, View, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { doc, getDoc, deleteDoc } from 'firebase/firestore';
-import { ref, push, set, remove, runTransaction, serverTimestamp } from 'firebase/database';
+import { ref, push, set, remove, get, serverTimestamp } from 'firebase/database';
 import { safeRef, safeOnValue, str, isValidKey } from '../safe';
 import { firestore, db } from '../firebase';
 import { useAuth } from '../AuthContext';
@@ -68,7 +68,14 @@ export default function BlogViewScreen({ route, navigation }) {
 
   useEffect(() => {
     getDoc(doc(firestore, 'blogs', id)).then((d) => setPost(d.exists() ? { id: d.id, ...d.data() } : null)).catch(() => setPost(null));
-    runTransaction(ref(db, `blogs/${id}/views`), (v) => (v || 0) + 1).catch(() => {});
+    const vRef = ref(db, `blogs/${id}/views`);
+    get(vRef).then((snap) => {
+      if (snap.exists()) {
+        set(vRef, (Number(snap.val()) || 0) + 1).catch(() => {});
+      } else {
+        set(vRef, 1).catch(() => {});
+      }
+    }).catch(() => {});
   }, [id]);
 
   useEffect(() => {

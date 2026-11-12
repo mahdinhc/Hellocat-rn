@@ -1,5 +1,20 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { FlatList, View, TouchableOpacity, Image, Linking, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Modal, Pressable } from 'react-native';
+import {
+  FlatList,
+  View,
+  TouchableOpacity,
+  Image,
+  Linking,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  Animated,
+  PanResponder,
+} from 'react-native';
+import Svg, { Path as SvgPath } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -8,7 +23,19 @@ import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText, Avatar, Row, Input, Loading } from '../components/ui';
 import { useUser } from '../services/users';
-import { getOrCreateChat, sendTextMessage, sendFileMessage, removeMessage, markSeen, setTyping, uploadChatFile, reactToMessage, unreactMessage } from '../services/chat';
+import {
+  getOrCreateChat,
+  sendTextMessage,
+  sendFileMessage,
+  removeMessage,
+  markSeen,
+  setTyping,
+  uploadChatFile,
+  reactToMessage,
+  unreactMessage,
+  saveMessageDoodle,
+  deleteMessageDoodle,
+} from '../services/chat';
 import { userDisplayName, formatClock, isImageType, bytesToLabel } from '../utils';
 import { previewOf } from './ChatsScreen';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -89,7 +116,45 @@ function codeToChar(code) {
   return code;
 }
 
-function Bubble({ m, mine, replied, onLongPress, onToggleReact, currentUid, theme }) {
+function Bubble({ m, mine, replied, onLongPress, onToggleReact, onReply, currentUid, theme }) {
+  const panX = useRef(new Animated.Value(0)).current;
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          // Horizontal swipe with minimal vertical movement
+          return Math.abs(gestureState.dx) > 15 && Math.abs(gestureState.dy) < 15;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          // Allow swiping right (or slight left)
+          if (gestureState.dx > 0) {
+            panX.setValue(Math.min(gestureState.dx, 70));
+          } else {
+            panX.setValue(Math.max(gestureState.dx, -30));
+          }
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx > 40) {
+            if (onReply && !m.removed) onReply(m);
+          }
+          Animated.spring(panX, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 6,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(panX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [m, onReply, panX]
+  );
+
   if (m.type === 'event') {
     return <AppText size={12} muted style={{ textAlign: 'center', marginVertical: 8 }}>{previewOf(m, '')}</AppText>;
   }
@@ -169,50 +234,96 @@ function Bubble({ m, mine, replied, onLongPress, onToggleReact, currentUid, them
   }
 
   return (
-    <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', marginVertical: 2, paddingHorizontal: 10 }}>
-      <TouchableOpacity activeOpacity={0.85} onLongPress={() => onLongPress(m)} style={{ maxWidth: '82%', backgroundColor: bg, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 }}>
-        {replied ? (
-          <View style={{ borderLeftWidth: 3, borderLeftColor: fg, opacity: 0.7, paddingLeft: 8, marginBottom: 6 }}>
-            <AppText size={12} numberOfLines={2} style={{ color: fg }}>{previewOf(replied, '')}</AppText>
-          </View>
-        ) : null}
-        {body}
-        <Row style={{ justifyContent: 'flex-end', marginTop: 3 }}>
-          <AppText size={10} style={{ color: fg, opacity: 0.6 }}>{formatClock(m.timestamp)}</AppText>
-          {mine && !m.removed ? <Ionicons name={m.isSeenByReceiver ? 'checkmark-done' : 'checkmark'} size={13} color={fg} style={{ opacity: 0.7, marginLeft: 4 }} /> : null}
-        </Row>
-      </TouchableOpacity>
-      {aggregatedReacts.length > 0 ? (
-        <Row style={{ flexWrap: 'wrap', marginTop: -6, marginBottom: 4, zIndex: 2, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 6 }}>
-          {aggregatedReacts.map((r) => (
-            <TouchableOpacity
-              key={r.type}
-              activeOpacity={0.7}
-              onPress={() => onToggleReact && onToggleReact(m, r.type)}
+    <View style={{ marginVertical: 2, paddingHorizontal: 10 }}>
+      {/* Slide to reply animated container */}
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={{
+          transform: [{ translateX: panX }],
+          alignItems: mine ? 'flex-end' : 'flex-start',
+        }}
+      >
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onLongPress={() => onLongPress(m)}
+          style={{
+            maxWidth: '82%',
+            backgroundColor: bg,
+            borderRadius: 16,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          {replied ? (
+            <View style={{ borderLeftWidth: 3, borderLeftColor: fg, opacity: 0.7, paddingLeft: 8, marginBottom: 6 }}>
+              <AppText size={12} numberOfLines={2} style={{ color: fg }}>{previewOf(replied, '')}</AppText>
+            </View>
+          ) : null}
+          {body}
+
+          {/* Message Doodle overlay if present */}
+          {m.doodle && m.doodle.url ? (
+            <View
+              pointerEvents="none"
               style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: r.mine ? (theme.card || '#2a2a2a') : (theme.bg || '#1a1a1a'),
-                borderWidth: 1,
-                borderColor: r.mine ? theme.link : (theme.border || '#333'),
-                borderRadius: 12,
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                marginRight: 4,
-                marginBottom: 2,
-                elevation: 2,
-                shadowColor: '#000',
-                shadowOpacity: 0.2,
-                shadowRadius: 2,
-                shadowOffset: { width: 0, height: 1 },
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 10,
               }}
             >
-              <AppText size={12}>{r.char}</AppText>
-              {r.count > 1 ? <AppText size={11} style={{ color: theme.text, marginLeft: 3, fontWeight: '600' }}>{r.count}</AppText> : null}
-            </TouchableOpacity>
-          ))}
-        </Row>
-      ) : null}
+              <Image
+                source={{ uri: m.doodle.url }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="contain"
+              />
+            </View>
+          ) : null}
+
+          <Row style={{ justifyContent: 'flex-end', marginTop: 3 }}>
+            {m.doodle && m.doodle.url ? (
+              <Ionicons name="brush-outline" size={11} color={fg} style={{ opacity: 0.8, marginRight: 4 }} />
+            ) : null}
+            <AppText size={10} style={{ color: fg, opacity: 0.6 }}>{formatClock(m.timestamp)}</AppText>
+            {mine && !m.removed ? <Ionicons name={m.isSeenByReceiver ? 'checkmark-done' : 'checkmark'} size={13} color={fg} style={{ opacity: 0.7, marginLeft: 4 }} /> : null}
+          </Row>
+        </TouchableOpacity>
+        {aggregatedReacts.length > 0 ? (
+          <Row style={{ flexWrap: 'wrap', marginTop: -6, marginBottom: 4, zIndex: 2, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 6 }}>
+            {aggregatedReacts.map((r) => (
+              <TouchableOpacity
+                key={r.type}
+                activeOpacity={0.7}
+                onPress={() => onToggleReact && onToggleReact(m, r.type)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: r.mine ? (theme.card || '#2a2a2a') : (theme.bg || '#1a1a1a'),
+                  borderWidth: 1,
+                  borderColor: r.mine ? theme.link : (theme.border || '#333'),
+                  borderRadius: 12,
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  marginRight: 4,
+                  marginBottom: 2,
+                  elevation: 2,
+                  shadowColor: '#000',
+                  shadowOpacity: 0.2,
+                  shadowRadius: 2,
+                  shadowOffset: { width: 0, height: 1 },
+                }}
+              >
+                <AppText size={12}>{r.char}</AppText>
+                {r.count > 1 ? <AppText size={11} style={{ color: theme.text, marginLeft: 3, fontWeight: '600' }}>{r.count}</AppText> : null}
+              </TouchableOpacity>
+            ))}
+          </Row>
+        ) : null}
+      </Animated.View>
     </View>
   );
 }
@@ -442,6 +553,79 @@ export default function ChatScreen({ route, navigation }) {
     closeMenu();
   };
 
+  // Doodle state
+  const [doodleModalVisible, setDoodleModalVisible] = useState(false);
+  const [doodleTargetMessage, setDoodleTargetMessage] = useState(null);
+  const [doodlePaths, setDoodlePaths] = useState([]);
+  const [currentDoodlePath, setCurrentDoodlePath] = useState(null);
+  const [doodleColor, setDoodleColor] = useState('#ff4444');
+  const [doodleStrokeWidth, setDoodleStrokeWidth] = useState(4);
+
+  const startDoodleForSelected = () => {
+    if (!selectedMessage) return;
+    setDoodleTargetMessage(selectedMessage);
+    setDoodlePaths([]);
+    setCurrentDoodlePath(null);
+    closeMenu();
+    setDoodleModalVisible(true);
+  };
+
+  const removeDoodleForSelected = () => {
+    if (!selectedMessage || !cid) return;
+    deleteMessageDoodle(cid, selectedMessage.key)
+      .then(() => Alert.alert('Success', 'Doodle removed.'))
+      .catch((e) => Alert.alert('Error', (e && e.message) || 'Could not remove doodle'));
+    closeMenu();
+  };
+
+  const handleDoodleSave = async () => {
+    if (!doodleTargetMessage || !cid) return;
+    if (doodlePaths.length === 0) {
+      setDoodleModalVisible(false);
+      return;
+    }
+    try {
+      // Build pure SVG string
+      const pathElements = doodlePaths.map((p) => {
+        if (!p.points || p.points.length < 2) return '';
+        const d = 'M ' + p.points.map((pt) => pt.x.toFixed(1) + ' ' + pt.y.toFixed(1)).join(' L ');
+        return `<path d="${d}" stroke="${p.color}" stroke-width="${p.width}" fill="none" stroke-linecap="round" stroke-linejoin="round" />`;
+      }).join('');
+      const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="240" viewBox="0 0 300 240">${pathElements}</svg>`;
+      const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgContent)}`;
+
+      await saveMessageDoodle(cid, doodleTargetMessage.key, dataUrl, { top: 0, left: 0, width: 300, height: 240 });
+      setDoodleModalVisible(false);
+      setDoodleTargetMessage(null);
+    } catch (e) {
+      Alert.alert('Error', (e && e.message) || 'Failed to save doodle');
+    }
+  };
+
+  // Direct paste image / GIF support
+  const pasteImageFromClipboard = async () => {
+    try {
+      const hasImg = await Clipboard.hasImageAsync();
+      if (!hasImg) {
+        // Also check if clipboard has an image/gif URL
+        const textInClip = await Clipboard.getStringAsync();
+        if (textInClip && /^https?:\/\/.*\.(png|jpg|jpeg|gif|webp)(\?.*)?$/i.test(textInClip.trim())) {
+          await sendAsset({ uri: textInClip.trim(), fileName: `image_${Date.now()}.gif` }, 'image/gif');
+          return;
+        }
+        Alert.alert('Clipboard', 'No image found in clipboard. Copy an image or image URL first!');
+        return;
+      }
+      const img = await Clipboard.getImageAsync({ format: 'png' });
+      if (img && img.data) {
+        const dataUri = img.data.startsWith('data:') ? img.data : `data:image/png;base64,${img.data}`;
+        await sendAsset({ uri: dataUri, fileName: `clipboard_${Date.now()}.png` }, 'image/png');
+      }
+    } catch (e) {
+      Alert.alert('Paste Error', (e && e.message) || 'Could not paste image');
+    }
+  };
+
   if (!fid) return <Screen><AppText muted style={{ textAlign: 'center', padding: 24 }}>This conversation is not available.</AppText></Screen>;
   if (!msgs) return <Loading />;
   const data = [...msgs].reverse();
@@ -462,6 +646,7 @@ export default function ChatScreen({ route, navigation }) {
                 replied={item.reply_of ? byKey[item.reply_of] : null}
                 onLongPress={onLongPress}
                 onToggleReact={toggleReact}
+                onReply={(msg) => setReplyTo(msg)}
                 currentUid={uid}
                 theme={theme}
               />
@@ -476,9 +661,12 @@ export default function ChatScreen({ route, navigation }) {
             <TouchableOpacity onPress={() => setReplyTo(null)}><Ionicons name="close" size={20} color={theme.text} /></TouchableOpacity>
           </Row>
         ) : null}
-        <Row style={{ backgroundColor: theme.chatFootBg, paddingHorizontal: 8, paddingVertical: 6 }}>
-          <TouchableOpacity onPress={attach} disabled={uploading} style={{ padding: 8 }}>
+        <Row style={{ backgroundColor: theme.chatFootBg, paddingHorizontal: 8, paddingVertical: 6, alignItems: 'center' }}>
+          <TouchableOpacity onPress={attach} disabled={uploading} style={{ padding: 6 }}>
             {uploading ? <ActivityIndicator color={theme.link} /> : <Ionicons name="attach" size={26} color={theme.link} />}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={pasteImageFromClipboard} disabled={uploading} style={{ padding: 6 }} accessibilityLabel="Paste Image or GIF">
+            <Ionicons name="clipboard-outline" size={22} color={theme.link} />
           </TouchableOpacity>
           <Input value={text} onChangeText={onChange} placeholder="Message..." multiline style={{ flex: 1, marginBottom: 0, maxHeight: 120, borderRadius: 20 }} />
           <TouchableOpacity onPress={send} disabled={!text.trim()} style={{ padding: 8, opacity: text.trim() ? 1 : 0.4 }}>
@@ -568,6 +756,20 @@ export default function ChatScreen({ route, navigation }) {
                 <AppText size={15} style={{ color: theme.link }}>Reply</AppText>
               </TouchableOpacity>
 
+              {/* Doodle trigger */}
+              <TouchableOpacity onPress={startDoodleForSelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
+                <Ionicons name="brush-outline" size={20} color="#f59e0b" style={{ marginRight: 14 }} />
+                <AppText size={15} style={{ color: '#f59e0b' }}>Doodle on Message</AppText>
+              </TouchableOpacity>
+
+              {/* Delete doodle if present */}
+              {selectedMessage?.doodle && (selectedMessage?.send_from === uid || !mine) ? (
+                <TouchableOpacity onPress={removeDoodleForSelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
+                  <Ionicons name="color-wand-outline" size={20} color="#ff6c61" style={{ marginRight: 14 }} />
+                  <AppText size={15} style={{ color: '#ff6c61' }}>Delete Doodle</AppText>
+                </TouchableOpacity>
+              ) : null}
+
               {selectedMessage?.send_from === uid && !selectedMessage?.removed ? (
                 <TouchableOpacity onPress={deleteSelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
                   <Ionicons name="trash-outline" size={20} color="#ff6c61" style={{ marginRight: 14 }} />
@@ -653,6 +855,154 @@ export default function ChatScreen({ route, navigation }) {
             />
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* Message Doodle Canvas Modal */}
+      <Modal visible={doodleModalVisible} transparent animationType="slide" onRequestClose={() => setDoodleModalVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+          <View style={{ width: '100%', maxWidth: 360, backgroundColor: theme.card || '#1f1f23', borderRadius: 20, overflow: 'hidden', elevation: 16 }}>
+            {/* Doodle Header */}
+            <Row style={{ paddingHorizontal: 16, paddingVertical: 12, justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: theme.border || '#333' }}>
+              <AppText bold size={16}>Doodle on Message</AppText>
+              <TouchableOpacity onPress={() => setDoodleModalVisible(false)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={24} color={theme.text} />
+              </TouchableOpacity>
+            </Row>
+
+            {/* Colors & Brush Size Selector */}
+            <Row style={{ paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.dark ? '#18181b' : '#f4f4f5' }}>
+              <Row style={{ gap: 8 }}>
+                {['#ff4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ffffff'].map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    onPress={() => setDoodleColor(c)}
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 13,
+                      backgroundColor: c,
+                      borderWidth: doodleColor === c ? 3 : 1,
+                      borderColor: doodleColor === c ? '#fff' : '#666',
+                    }}
+                  />
+                ))}
+              </Row>
+              <Row style={{ gap: 6 }}>
+                {[3, 6, 12].map((s) => (
+                  <TouchableOpacity
+                    key={s}
+                    onPress={() => setDoodleStrokeWidth(s)}
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 12,
+                      backgroundColor: doodleStrokeWidth === s ? theme.link : 'transparent',
+                    }}
+                  >
+                    <AppText size={12} style={{ color: doodleStrokeWidth === s ? '#fff' : theme.text }}>
+                      {s}px
+                    </AppText>
+                  </TouchableOpacity>
+                ))}
+              </Row>
+            </Row>
+
+            {/* Interactive Drawing Pad */}
+            <View
+              style={{
+                width: '100%',
+                height: 240,
+                backgroundColor: theme.dark ? '#111' : '#f9f9f9',
+                position: 'relative',
+              }}
+              onStartShouldSetResponder={() => true}
+              onMoveShouldSetResponder={() => true}
+              onResponderGrant={(evt) => {
+                const { locationX, locationY } = evt.nativeEvent;
+                const newPath = {
+                  color: doodleColor,
+                  width: doodleStrokeWidth,
+                  points: [{ x: locationX, y: locationY }],
+                };
+                setCurrentDoodlePath(newPath);
+              }}
+              onResponderMove={(evt) => {
+                const { locationX, locationY } = evt.nativeEvent;
+                if (!currentDoodlePath) return;
+                const updatedPoints = [...currentDoodlePath.points, { x: locationX, y: locationY }];
+                setCurrentDoodlePath({ ...currentDoodlePath, points: updatedPoints });
+              }}
+              onResponderRelease={() => {
+                if (currentDoodlePath) {
+                  setDoodlePaths((prev) => [...prev, currentDoodlePath]);
+                  setCurrentDoodlePath(null);
+                }
+              }}
+            >
+              <Svg style={{ width: '100%', height: '100%' }}>
+                {doodlePaths.map((p, idx) => {
+                  if (!p.points || p.points.length < 2) return null;
+                  const d = 'M ' + p.points.map((pt) => `${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(' L ');
+                  return (
+                    <SvgPath
+                      key={idx}
+                      d={d}
+                      stroke={p.color}
+                      strokeWidth={p.width}
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  );
+                })}
+                {currentDoodlePath && currentDoodlePath.points.length > 1 ? (
+                  <SvgPath
+                    d={'M ' + currentDoodlePath.points.map((pt) => `${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(' L ')}
+                    stroke={currentDoodlePath.color}
+                    strokeWidth={currentDoodlePath.width}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ) : null}
+              </Svg>
+            </View>
+
+            {/* Footer Buttons: Undo, Clear, Save */}
+            <Row style={{ paddingHorizontal: 16, paddingVertical: 12, justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: theme.border || '#333' }}>
+              <Row style={{ gap: 12 }}>
+                <TouchableOpacity
+                  onPress={() => setDoodlePaths((prev) => prev.slice(0, -1))}
+                  disabled={doodlePaths.length === 0}
+                  style={{ opacity: doodlePaths.length > 0 ? 1 : 0.4 }}
+                >
+                  <Ionicons name="arrow-undo" size={22} color={theme.text} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setDoodlePaths([])}
+                  disabled={doodlePaths.length === 0}
+                  style={{ opacity: doodlePaths.length > 0 ? 1 : 0.4 }}
+                >
+                  <Ionicons name="trash-outline" size={22} color="#ff6c61" />
+                </TouchableOpacity>
+              </Row>
+              <Row style={{ gap: 10 }}>
+                <TouchableOpacity
+                  onPress={() => setDoodleModalVisible(false)}
+                  style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: theme.dark ? '#333' : '#e5e7eb' }}
+                >
+                  <AppText size={14}>Cancel</AppText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleDoodleSave}
+                  style={{ paddingHorizontal: 18, paddingVertical: 8, borderRadius: 16, backgroundColor: theme.link }}
+                >
+                  <AppText bold size={14} style={{ color: '#fff' }}>Apply</AppText>
+                </TouchableOpacity>
+              </Row>
+            </Row>
+          </View>
+        </View>
       </Modal>
     </Screen>
   );

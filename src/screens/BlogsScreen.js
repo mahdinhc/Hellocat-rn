@@ -2,13 +2,26 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { FlatList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, query, where, orderBy, limit, startAfter, getDocs } from 'firebase/firestore';
-import { firestore } from '../firebase';
+import { ref, get, set } from 'firebase/database';
+import { firestore, db } from '../firebase';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, Empty, Loading } from '../components/ui';
 import { BlogCard } from './BlogComponents';
 import { cacheBlogPosts, getCachedBlogPosts } from '../services/offlineStorage';
 
 const PAGE = 10;
+
+function incrementBlogViews(blogId) {
+  if (!blogId) return;
+  const vRef = ref(db, `blogs/${blogId}/views`);
+  get(vRef).then((snap) => {
+    if (snap.exists()) {
+      set(vRef, (Number(snap.val()) || 0) + 1).catch(() => {});
+    } else {
+      set(vRef, 1).catch(() => {});
+    }
+  }).catch(() => {});
+}
 
 export default function BlogsScreen({ navigation }) {
   const { theme } = useTheme();
@@ -27,6 +40,7 @@ export default function BlogsScreen({ navigation }) {
       if (!reset && last.current) q = query(collection(firestore, 'blogs'), where('visibility', '==', 'public'), orderBy('server_ts', 'desc'), startAfter(last.current), limit(PAGE));
       const snap = await getDocs(q);
       const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      items.forEach((item) => incrementBlogViews(item.id));
       if (snap.docs.length) last.current = snap.docs[snap.docs.length - 1];
       setHasMore(snap.docs.length >= PAGE);
       setPosts((prev) => {
