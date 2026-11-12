@@ -29,3 +29,16 @@ export function notifyIncomingCallPush(callId, targetUid, callType, cid) {
       .catch(() => {});
   } catch (e) { /* ignore */ }
 }
+
+export function notifyCancelCallPush(callId, targetUid) {
+  try {
+    if (!PUSH_WORKER_URL || !callId || !targetUid || !auth.currentUser) return;
+    auth.currentUser.getIdToken()
+      .then((idToken) => fetch(PUSH_WORKER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callId, targetUid, cancel: true, idToken }),
+      }))
+      .catch(() => {});
+  } catch (e) { /* ignore */ }
+}

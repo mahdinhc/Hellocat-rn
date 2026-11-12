@@ -530,8 +530,12 @@ object CallNotifier {
             if (callId != null && callId.isNotEmpty()) {
                 live.remove(callId)
                 nm.cancel(NTAG, callId.hashCode())
+                nm.cancel(callId.hashCode())
             } else {
-                for (id in live.toList()) nm.cancel(NTAG, id.hashCode())
+                for (id in live.toList()) {
+                    nm.cancel(NTAG, id.hashCode())
+                    nm.cancel(id.hashCode())
+                }
                 live.clear()
             }
         } catch (t: Throwable) {}

@@ -8,7 +8,7 @@ import { RTCPeerConnection, RTCIceCandidate, RTCSessionDescription, mediaDevices
 import InCallManager from 'react-native-incall-manager';
 import { pushAndNotify } from './chat';
 import { callRecorder } from './callRecorder';
-import { notifyIncomingCallPush } from './pushNotify';
+import { notifyIncomingCallPush, notifyCancelCallPush } from './pushNotify';
 import { AppState } from 'react-native';
 import { getNotificationSettings, presentIncomingCall, dismissIncomingCall } from './notifications';
 import { playRingtone, stopRingtone, loadRingtone } from './ringtone';
@@ -337,7 +337,10 @@ class MobileCallManager {
     this.ringTimeout = setTimeout(() => {
       if (this.activeCall && this.activeCall.status === 'calling') {
         update(ref(db, `calls/${callKey}`), { status: 'no_answer' }).catch(() => {});
-        if (fid) set(ref(db, `users/${fid}/incoming_call`), null).catch(() => {});
+        if (fid) {
+          set(ref(db, `users/${fid}/incoming_call`), null).catch(() => {});
+          notifyCancelCallPush(callKey, fid);
+        }
         setTimeout(() => this.cleanup(), 1000);
       }
     }, 35000);
@@ -439,7 +442,9 @@ class MobileCallManager {
 
     stopRingtone().catch(() => {});
     dismissIncomingCall(this.activeCall.callId);
+    dismissIncomingCall();
     nativeCall.cancel(this.activeCall.callId);
+    nativeCall.cancel('');
     try {
       InCallManager.stopRingtone();
       InCallManager.start({ media: this.activeCall.type });
@@ -572,6 +577,7 @@ class MobileCallManager {
       update(ref(db, `calls/${this.activeCall.callId}`), { status: 'ended' });
       if (this.activeCall.fid) {
         set(ref(db, `users/${this.activeCall.fid}/incoming_call`), null);
+        notifyCancelCallPush(this.activeCall.callId, this.activeCall.fid);
       }
     }
     this.cleanup();
@@ -737,8 +743,11 @@ class MobileCallManager {
     }
     this.isReconnecting = false;
     stopRingtone().catch(() => {});
-    dismissIncomingCall(this.activeCall && this.activeCall.callId);
-    nativeCall.cancel(this.activeCall && this.activeCall.callId);
+    const cid = this.activeCall?.callId;
+    dismissIncomingCall(cid);
+    dismissIncomingCall(); // dismiss all pending incoming call notifications
+    nativeCall.cancel(cid);
+    nativeCall.cancel(''); // cancels all notifications in native CallNotifier
     try {
       InCallManager.stop();
       InCallManager.stopRingback();

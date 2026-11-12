@@ -76,7 +76,7 @@ export default {
     try {
       const tok = await accessToken(env);
 
-      // --- BRANCH A: INCOMING CALL HIGH-PRIORITY WAKEUP ---
+      // --- BRANCH A: INCOMING CALL HIGH-PRIORITY WAKEUP OR CANCEL ---
       if (callId && targetUid) {
         if (!isKey(callId) || !isKey(targetUid) || targetUid === caller) return reply(400);
 
@@ -91,10 +91,11 @@ export default {
         const list = tokens && typeof tokens === 'object' ? Object.keys(tokens) : [];
         if (!list.length) return reply(200, { sent: 0, reason: 'no_tokens' });
 
+        const isCancel = body.cancel === true || callType === 'cancel';
         const callerName = displayName(sender);
         const isVideo = callType === 'video';
-        const title = `Incoming ${isVideo ? 'Video' : 'Audio'} Call`;
-        const text = `${callerName} is calling you...`;
+        const title = isCancel ? 'Call Ended' : `Incoming ${isVideo ? 'Video' : 'Audio'} Call`;
+        const text = isCancel ? `${callerName} hung up` : `${callerName} is calling you...`;
 
         let sent = 0;
         await Promise.all(list.map(async (t) => {
@@ -104,7 +105,11 @@ export default {
             body: JSON.stringify({
               message: {
                 token: t,
-                data: {
+                data: isCancel ? {
+                  type: 'cancel_call',
+                  callId,
+                  callerId: caller,
+                } : {
                   type: 'incoming_call',
                   callId,
                   callerId: caller,
@@ -113,7 +118,7 @@ export default {
                   callType: callType || 'audio',
                   cid: cid || '',
                 },
-                android: { priority: 'HIGH', ttl: '45s' },
+                android: { priority: 'HIGH', ttl: isCancel ? '10s' : '45s' },
               },
             }),
           });
@@ -123,7 +128,7 @@ export default {
           }
         }));
 
-        return reply(200, { sent, type: 'call' });
+        return reply(200, { sent, type: isCancel ? 'cancel_call' : 'call' });
       }
 
       // --- BRANCH B: CHAT MESSAGE PUSH ---
