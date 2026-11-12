@@ -55,6 +55,7 @@ export function normalizeMessage(key, raw) {
     callType: str(m.callType),
     callStatus: str(m.callStatus),
     duration: num(m.duration, 0),
+    reacts: m.reacts && typeof m.reacts === 'object' ? m.reacts : null,
   };
 }
 

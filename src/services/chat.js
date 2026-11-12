@@ -1,8 +1,8 @@
 import { ref, get, update, push, remove, set, serverTimestamp } from 'firebase/database';
-import { ref as sref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { db } from '../firebase';
 import { makeChatId, randomString } from '../utils';
 import { notifyPush } from './pushNotify';
+import { uploadFile, uploadChatAsset } from './storage';
 
 // push() returns a promise-like ref; once the server has the message, ask the worker to send the push.
 export function pushAndNotify(cid, data) {
@@ -74,16 +74,13 @@ export function removeConversation(uid, fid) {
   return remove(ref(db, `chats/${uid}/${fid}`));
 }
 
-// Uploads a local file (uri) to Firebase Storage and returns its download URL.
+// Uploads a local file (uri) to the active storage provider (ImageKit or Firebase)
 export async function uploadLocalFile(path, uri, contentType) {
-  const blob = await (await fetch(uri)).blob();
-  const r = sref(storage, path);
-  await uploadBytes(r, blob, contentType ? { contentType } : undefined);
-  return getDownloadURL(r);
+  const fileName = path.split('/').pop() || `file_${Date.now()}`;
+  const dirPath = path.substring(0, path.lastIndexOf('/')) || 'uploads';
+  return uploadFile(uri, { path: dirPath, fileName, contentType });
 }
 
 export async function uploadChatFile(uid, asset) {
-  const name = asset.fileName || asset.name || `file_${Date.now()}`;
-  const url = await uploadLocalFile(`0xab/${uid}/${randomString(12)}/${name}`, asset.uri, asset.mimeType);
-  return { url, name };
+  return uploadChatAsset(uid, asset);
 }

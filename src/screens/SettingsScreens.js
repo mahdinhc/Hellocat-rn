@@ -13,6 +13,7 @@ import { Screen, AppText, Avatar, Row, Button, Input, Loading, Empty } from '../
 import { Switch, Linking, AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import { getNotificationSettings, loadNotificationSettings, saveNotificationSettings, requestPermission, hasPermission, sendTestNotification, setupNotifications } from '../services/notifications';
+import { getStorageProvider, setStorageProvider, IMAGEKIT_CONFIG } from '../services/storage';
 import { uploadLocalFile } from '../services/chat';
 import { invalidateUser } from '../services/users';
 import { validateName, formatDateTime } from '../utils';
@@ -68,6 +69,7 @@ export function SettingsScreen({ navigation }) {
       <Item icon="person-outline" label="Profile" to="SettingsProfile" />
       <Item icon="key-outline" label="Account" to="SettingsAccount" />
       <Item icon="notifications-outline" label="Notifications" to="SettingsNotifications" />
+      <Item icon="cloud-upload-outline" label="Storage" to="SettingsStorage" />
       <Item icon="color-palette-outline" label="Theme" to="SettingsTheme" />
       <Item icon="time-outline" label="Login history" to="SettingsHistory" />
       {devUnlocked ? (
@@ -514,6 +516,78 @@ export function SettingsDeveloperScreen() {
           })
         )}
         <View style={{ height: 30 }} />
+      </ScrollView>
+    </Screen>
+  );
+}
+
+export function SettingsStorageScreen() {
+  const { theme } = useTheme();
+  const [provider, setProvider] = useState('imagekit');
+
+  useEffect(() => {
+    getStorageProvider().then((p) => setProvider(p)).catch(() => {});
+  }, []);
+
+  const select = async (p) => {
+    setProvider(p);
+    await setStorageProvider(p);
+  };
+
+  const Option = ({ id, title, desc, active }) => (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={() => select(id)}
+      style={{
+        padding: 16,
+        marginBottom: 12,
+        borderRadius: 14,
+        backgroundColor: active ? (theme.link + '18') : (theme.card || '#1f1f1f'),
+        borderWidth: 1.5,
+        borderColor: active ? theme.link : (theme.border || '#333'),
+      }}
+    >
+      <Row style={{ alignItems: 'center' }}>
+        <Ionicons
+          name={active ? 'radio-button-on' : 'radio-button-off'}
+          size={20}
+          color={active ? theme.link : (theme.textMuted || '#777')}
+          style={{ marginRight: 12 }}
+        />
+        <View style={{ flex: 1 }}>
+          <AppText style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>{title}</AppText>
+          <AppText size={12} muted style={{ marginTop: 2 }}>{desc}</AppText>
+        </View>
+      </Row>
+    </TouchableOpacity>
+  );
+
+  return (
+    <Screen style={{ padding: 16 }}>
+      <ScrollView>
+        <AppText style={{ fontSize: 18, fontWeight: '700', marginBottom: 6 }}>Storage Provider</AppText>
+        <AppText size={13} muted style={{ marginBottom: 18 }}>
+          Choose where chat files, attachments, blog media, and profile pictures are uploaded.
+        </AppText>
+
+        <Option
+          id="imagekit"
+          title="ImageKit.io (Recommended)"
+          desc="Fast global CDN storage with zero quota limits on HelloCat."
+          active={provider === 'imagekit'}
+        />
+
+        <Option
+          id="firebase"
+          title="Firebase Storage"
+          desc="Direct upload to Google Cloud Firebase bucket."
+          active={provider === 'firebase'}
+        />
+
+        <View style={{ marginTop: 12, padding: 14, borderRadius: 12, backgroundColor: theme.card || '#1f1f1f' }}>
+          <AppText size={12} muted>Active Endpoint:</AppText>
+          <AppText size={12} style={{ color: theme.link, marginTop: 2 }}>{IMAGEKIT_CONFIG.urlEndpoint}</AppText>
+        </View>
       </ScrollView>
     </Screen>
   );

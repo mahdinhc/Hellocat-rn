@@ -26,7 +26,7 @@ import BlogsScreen from './src/screens/BlogsScreen';
 import BlogViewScreen from './src/screens/BlogViewScreen';
 import CreatePostScreen from './src/screens/CreatePostScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import { SettingsScreen, SettingsProfileScreen, SettingsAccountScreen, SettingsThemeScreen, SettingsHistoryScreen, SettingsNotificationsScreen, SettingsDeveloperScreen } from './src/screens/SettingsScreens';
+import { SettingsScreen, SettingsProfileScreen, SettingsAccountScreen, SettingsThemeScreen, SettingsHistoryScreen, SettingsNotificationsScreen, SettingsDeveloperScreen, SettingsStorageScreen } from './src/screens/SettingsScreens';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -112,6 +112,7 @@ function MainStack() {
       <Stack.Screen name="SettingsProfile" component={SettingsProfileScreen} options={{ title: 'Edit profile' }} />
       <Stack.Screen name="SettingsAccount" component={SettingsAccountScreen} options={{ title: 'Account' }} />
       <Stack.Screen name="SettingsNotifications" component={SettingsNotificationsScreen} options={{ title: 'Notifications' }} />
+      <Stack.Screen name="SettingsStorage" component={SettingsStorageScreen} options={{ title: 'Storage' }} />
       <Stack.Screen name="SettingsTheme" component={SettingsThemeScreen} options={{ title: 'Theme' }} />
       <Stack.Screen name="SettingsHistory" component={SettingsHistoryScreen} options={{ title: 'Login history' }} />
       <Stack.Screen name="SettingsDeveloper" component={SettingsDeveloperScreen} options={{ title: 'Developer options' }} />
