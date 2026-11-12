@@ -18,29 +18,71 @@ function AvatarImg({ pic, size, style }) {
   );
 }
 
-// Compact pill banner (like a phone's heads-up incoming call). Tap the body to open the full screen.
+// Compact pill banner (like modern Android / iOS heads-up incoming call). Tap to open the full screen.
 function IncomingBanner({ name, pic, isVideo, onExpand }) {
-  const slide = useRef(new Animated.Value(-140)).current;
+  const slide = useRef(new Animated.Value(-160)).current;
+  const pulse = useRef(new Animated.Value(1)).current;
+
   useEffect(() => {
-    Animated.spring(slide, { toValue: 0, useNativeDriver: true, damping: 16, stiffness: 160, mass: 0.9 }).start();
+    Animated.spring(slide, {
+      toValue: 0,
+      useNativeDriver: true,
+      damping: 14,
+      stiffness: 140,
+      mass: 0.8,
+    }).start();
+
+    // Subtle gentle pulse on answer button to draw attention
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.08, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1.0, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
   }, []);
-  const top = (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50) + 8;
+
+  const top = (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50) + 6;
+
   return (
     <View pointerEvents="box-none" style={styles.bannerHost}>
       <Animated.View style={[styles.banner, { marginTop: top, transform: [{ translateY: slide }] }]}>
         <TouchableOpacity activeOpacity={0.85} onPress={onExpand} style={styles.bannerBody}>
-          <AvatarImg pic={pic} size={52} />
-          <View style={{ flex: 1, marginLeft: 14, marginRight: 8 }}>
+          <View style={styles.avatarWrap}>
+            <AvatarImg pic={pic} size={48} />
+            <View style={[styles.callTypeBadge, { backgroundColor: isVideo ? '#38bdf8' : '#22c55e' }]}>
+              <Ionicons name={isVideo ? 'videocam' : 'call'} size={11} color="#fff" />
+            </View>
+          </View>
+          <View style={{ flex: 1, marginLeft: 12, marginRight: 8, justifyContent: 'center' }}>
             <AppText style={styles.bannerTitle} numberOfLines={1}>{name}</AppText>
-            <AppText style={styles.bannerSub} numberOfLines={1}>Incoming {isVideo ? 'video' : 'voice'} call</AppText>
+            <AppText style={styles.bannerSub} numberOfLines={1}>
+              {isVideo ? 'Incoming video call...' : 'Incoming audio call...'}
+            </AppText>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity activeOpacity={0.8} style={[styles.bannerBtn, { backgroundColor: '#5cc43c' }]} onPress={() => callManager.acceptCall()}>
-          <Ionicons name={isVideo ? 'videocam' : 'call'} size={22} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity activeOpacity={0.8} style={[styles.bannerBtn, { backgroundColor: '#e0141c', marginLeft: 10 }]} onPress={() => callManager.rejectCall()}>
-          <Ionicons name="call" size={22} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
-        </TouchableOpacity>
+
+        {/* Action Buttons */}
+        <View style={styles.bannerActions}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={[styles.bannerBtn, styles.bannerDeclineBtn]}
+            onPress={() => callManager.rejectCall()}
+          >
+            <Ionicons name="call" size={20} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+          </TouchableOpacity>
+
+          <Animated.View style={{ transform: [{ scale: pulse }] }}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[styles.bannerBtn, styles.bannerAcceptBtn]}
+              onPress={() => callManager.acceptCall()}
+            >
+              <Ionicons name={isVideo ? 'videocam' : 'call'} size={21} color="#fff" />
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
       </Animated.View>
     </View>
   );
@@ -291,12 +333,85 @@ const { width } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
   overlay0: { ...StyleSheet.absoluteFillObject, zIndex: 999999, backgroundColor: '#14171c' },
-  bannerHost: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 999999, paddingHorizontal: 10 },
-  banner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2f3032', borderRadius: 44, paddingVertical: 12, paddingLeft: 14, paddingRight: 16, elevation: 14, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
-  bannerBody: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  bannerTitle: { color: '#ffffff', fontSize: 18, fontWeight: '600' },
-  bannerSub: { color: '#a1a6ad', fontSize: 13, marginTop: 2 },
-  bannerBtn: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  bannerHost: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 999999,
+    paddingHorizontal: 12,
+  },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e2430',
+    borderRadius: 36,
+    paddingVertical: 10,
+    paddingLeft: 12,
+    paddingRight: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  bannerBody: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarWrap: {
+    position: 'relative',
+  },
+  callTypeBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#1e2430',
+  },
+  bannerTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  bannerSub: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  bannerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bannerBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  bannerAcceptBtn: {
+    backgroundColor: '#22c55e',
+  },
+  bannerDeclineBtn: {
+    backgroundColor: '#ef4444',
+  },
   incomingRoot: { flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingBottom: 64 },
   incomingShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(12,14,18,0.78)' },
   incomingTop: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18 },

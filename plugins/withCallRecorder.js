@@ -510,7 +510,7 @@ object CallNotifier {
                 b.setCustomContentView(rv)
                 b.setCustomHeadsUpContentView(rv)
                 b.setCustomBigContentView(rv)
-                b.setStyle(NotificationCompat.DecoratedCustomViewStyle())
+                // plain custom view without system container decoration
             } else {
                 b.setContentTitle(title)
                 b.setContentText(sub)
