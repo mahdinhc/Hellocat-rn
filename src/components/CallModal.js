@@ -89,6 +89,7 @@ export default function CallModal() {
   const [expanded, setExpanded] = useState(false);
   const incomingId = callState.activeCall && callState.activeCall.callId;
   useEffect(() => { setExpanded(false); }, [incomingId]);
+  useEffect(() => { if (callState.fullScreenRequested) setExpanded(true); }, [callState.fullScreenRequested, incomingId]);
 
   useEffect(() => {
     return callManager.subscribe((state) => {

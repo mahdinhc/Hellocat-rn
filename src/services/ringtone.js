@@ -7,6 +7,7 @@ import { Vibration, Platform, NativeModules } from 'react-native';
 
 const Native = NativeModules.CallRecorderNative;
 import InCallManager from 'react-native-incall-manager';
+import { nativeCall, setNativePrefs } from './nativeCall';
 
 const KEY = 'hellocat_ringtone_v1';
 
@@ -27,6 +28,7 @@ export async function loadRingtone() {
     const raw = await AsyncStorage.getItem(KEY);
     if (raw) choice = { ...choice, ...JSON.parse(raw) };
   } catch (e) {}
+  setNativePrefs({ tone: choice.id });
   return choice;
 }
 export const getRingtone = () => choice;
@@ -34,6 +36,7 @@ export const getRingtone = () => choice;
 async function save(next) {
   choice = { ...choice, ...next };
   try { await AsyncStorage.setItem(KEY, JSON.stringify(choice)); } catch (e) {}
+  setNativePrefs({ tone: choice.id });
   return choice;
 }
 
@@ -70,9 +73,13 @@ export async function stopRingtone() {
   if (s) { try { await s.stopAsync(); } catch (e) {} try { await s.unloadAsync(); } catch (e) {} }
 }
 
-export async function playRingtone({ vibrate = true, loop = true, sound: withSound = true } = {}) {
+export async function playRingtone({ vibrate = true, loop = true, sound: withSound = true, ignoreRinger = false } = {}) {
   await stopRingtone();
+  // Follow the phone's ringer: silent / Do Not Disturb = no sound and no vibration, vibrate mode = vibration only.
+  const mode = ignoreRinger ? 'normal' : await nativeCall.ringerMode();
+  if (mode === 'silent') return;
   playing = true;
+  if (mode === 'vibrate') withSound = false;
   if (vibrate) { try { Vibration.vibrate([0, 700, 500, 700, 1500], true); } catch (e) {} }
   if (!withSound) return;
   // Preferred: native player on the RING stream (ring volume, respects silent mode, like a phone call)
@@ -110,6 +117,6 @@ export async function playRingtone({ vibrate = true, loop = true, sound: withSou
 
 // Preview in settings (plays ~4s once, no vibration).
 export async function previewRingtone() {
-  await playRingtone({ vibrate: false, loop: false });
+  await playRingtone({ vibrate: false, loop: false, ignoreRinger: true });
   setTimeout(() => { stopRingtone(); }, 5000);
 }

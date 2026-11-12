@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { query, limitToLast, set, remove, serverTimestamp } from 'firebase/database';
 import { safeRef, safeOnValue, normalizeMessage, isValidKey, reportError } from '../safe';
 import { getUser } from './users';
+import { setNativePrefs } from './nativeCall';
 import { userDisplayName } from '../utils';
 
 const SETTINGS_KEY = 'notif-settings-v1';
@@ -29,6 +30,15 @@ const DEFAULTS = {
   callVibrate: true,
   callBanner: true,
 };
+
+function syncNative() {
+  setNativePrefs({
+    enabled: settings.callsEnabled !== false,
+    banner: settings.callBanner !== false,
+    sound: settings.callSound !== false,
+    vibrate: settings.callVibrate !== false,
+  });
+}
 
 let Notifications = null;
 try { Notifications = require('expo-notifications'); } catch (e) { Notifications = null; }
@@ -53,6 +63,7 @@ export async function loadNotificationSettings() {
     }
   } catch (e) { /* keep defaults */ }
   loaded = true;
+  syncNative();
   return settings;
 }
 
@@ -66,6 +77,7 @@ export const getNotificationSettings = () => settings;
 
 export async function saveNotificationSettings(patch) {
   settings = { ...settings, ...pickBooleans(patch || {}) };
+  syncNative();
   try { await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ }
   subs.forEach((f) => { try { f(settings); } catch (e) { /* ignore */ } });
   syncPushPrefs();

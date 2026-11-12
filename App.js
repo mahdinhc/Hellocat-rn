@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Linking } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -148,6 +149,13 @@ function Root() {
       callManager.init(uid);
     }
   }, [uid]);
+
+  // Answer / Decline / open taps from the incoming-call notification arrive as hellocat://call/... links
+  useEffect(() => {
+    Linking.getInitialURL().then((u) => { if (u) callManager.handleCallUrl(u); }).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }) => callManager.handleCallUrl(url));
+    return () => { try { sub.remove(); } catch (e) { /* ignore */ } };
+  }, []);
 
   if (status === 'loading') return <Loading />;
   if (status === 'signedOut') return <AuthStack />;

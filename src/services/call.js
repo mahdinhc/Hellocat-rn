@@ -12,6 +12,7 @@ import { notifyIncomingCallPush } from './pushNotify';
 import { AppState } from 'react-native';
 import { getNotificationSettings, presentIncomingCall, dismissIncomingCall } from './notifications';
 import { playRingtone, stopRingtone, loadRingtone } from './ringtone';
+import { nativeCall } from './nativeCall';
 
 const ICE_SERVERS = {
   iceServers: [
@@ -63,6 +64,11 @@ class MobileCallManager {
 
     // Listeners for UI state updates
     this.subscribers = new Set();
+
+    this.pendingAnswerId = null;
+    this.pendingDeclineId = null;
+    this.fullScreenRequested = false;
+    this.appStateSub = null;
   }
 
   subscribe(callback) {
@@ -88,12 +94,61 @@ class MobileCallManager {
       isReconnecting: this.isReconnecting,
       localStream: this.localStream,
       remoteStream: this.remoteStream,
+      fullScreenRequested: this.fullScreenRequested,
     };
   }
 
   init(uid) {
     if (!uid) return;
     this.listenForIncomingCalls(uid);
+    if (!this.appStateSub) {
+      this.appStateSub = AppState.addEventListener('change', (st) => {
+        // App came to the front while a call is ringing (notification was showing): switch to the in-app ring
+        const c = this.activeCall;
+        if (st === 'active' && c && !c.isCaller && c.status === 'ringing' && this.pendingAnswerId !== c.callId) {
+          nativeCall.cancel(c.callId);
+          this.startInAppRing();
+        }
+      });
+    }
+  }
+
+  startInAppRing() {
+    const settings = getNotificationSettings();
+    if (settings.callsEnabled === false) return;
+    try { InCallManager.stopRingback(); } catch (e) {}
+    loadRingtone().then(() => playRingtone({
+      sound: settings.callSound !== false,
+      vibrate: settings.callVibrate !== false,
+    })).catch(() => {});
+  }
+
+  // hellocat://call/<answer|decline|open>?callId=..  (from the notification buttons / full-screen intent)
+  handleCallUrl(url) {
+    try {
+      const m = /^hellocat:\/\/call\/(\w+)\??(.*)$/.exec(url || '');
+      if (!m) return false;
+      const action = m[1];
+      const q = {};
+      (m[2] || '').split('&').forEach((kv) => { const [k, v] = kv.split('='); if (k) q[k] = decodeURIComponent(v || ''); });
+      const id = q.callId;
+      this.fullScreenRequested = true;
+      nativeCall.overLock(true);
+      setTimeout(() => { if (!this.activeCall) { this.fullScreenRequested = false; this.notifySubscribers(); } }, 60000);
+      const c = this.activeCall;
+      const same = c && !c.isCaller && c.status === 'ringing' && c.callId === id;
+      if (action === 'answer') {
+        if (same) this.acceptCall();
+        else { this.pendingAnswerId = id; setTimeout(() => { if (this.pendingAnswerId === id) this.pendingAnswerId = null; }, 30000); }
+      } else if (action === 'decline') {
+        this.leaveAfterDecline = true;
+        if (same) this.rejectCall();
+        else { this.pendingDeclineId = id; setTimeout(() => { if (this.pendingDeclineId === id) this.pendingDeclineId = null; }, 15000); }
+        setTimeout(() => { if (this.leaveAfterDecline) { this.leaveAfterDecline = false; nativeCall.moveToBack(); } }, 4500);
+      }
+      this.notifySubscribers();
+      return true;
+    } catch (e) { return false; }
   }
 
   listenForIncomingCalls(uid) {
@@ -168,12 +223,19 @@ class MobileCallManager {
     // Start native Android ringtone & vibration for incoming calls only (if enabled in settings)
     const settings = getNotificationSettings();
     if (settings.callsEnabled !== false) {
-      try { InCallManager.stopRingback(); } catch (e) {}
-      loadRingtone().then(() => playRingtone({
-        sound: settings.callSound !== false,
-        vibrate: settings.callVibrate !== false,
-      })).catch(() => {});
-      if (AppState.currentState !== 'active') presentIncomingCall(this.activeCall);
+      const inBackground = AppState.currentState !== 'active';
+      if (inBackground && nativeCall.available) {
+        // Pill notification (sound + vibration come from the notification channel, so no double ringing)
+        nativeCall.show({
+          callId: call.callId, callerId: call.callerId, callerName: this.activeCall.callerName,
+          callerPic: this.activeCall.callerPic, type: this.activeCall.type, cid: call.cid || '',
+        });
+      } else if (inBackground) {
+        this.startInAppRing();
+        presentIncomingCall(this.activeCall);
+      } else if (this.pendingAnswerId !== call.callId) {
+        this.startInAppRing();
+      }
     }
 
     if (this.ringTimeout) clearTimeout(this.ringTimeout);
@@ -185,6 +247,14 @@ class MobileCallManager {
     }, 35000);
 
     this.notifySubscribers();
+
+    if (this.pendingAnswerId && this.pendingAnswerId === call.callId) {
+      this.pendingAnswerId = null;
+      setTimeout(() => this.acceptCall(), 150);
+    } else if (this.pendingDeclineId && this.pendingDeclineId === call.callId) {
+      this.pendingDeclineId = null;
+      setTimeout(() => this.rejectCall(), 150);
+    }
   }
 
   async startCall(fid, type = 'audio', cid = null) {
@@ -343,6 +413,7 @@ class MobileCallManager {
 
     stopRingtone().catch(() => {});
     dismissIncomingCall(this.activeCall.callId);
+    nativeCall.cancel(this.activeCall.callId);
     try {
       InCallManager.stopRingtone();
       InCallManager.start({ media: this.activeCall.type });
@@ -453,6 +524,7 @@ class MobileCallManager {
   }
 
   rejectCall() {
+    if (this.leaveAfterDecline) { this.leaveAfterDecline = false; setTimeout(() => nativeCall.moveToBack(), 400); }
     if (this.ringTimeout) {
       clearTimeout(this.ringTimeout);
       this.ringTimeout = null;
@@ -638,6 +710,7 @@ class MobileCallManager {
     this.isReconnecting = false;
     stopRingtone().catch(() => {});
     dismissIncomingCall(this.activeCall && this.activeCall.callId);
+    nativeCall.cancel(this.activeCall && this.activeCall.callId);
     try {
       InCallManager.stop();
       InCallManager.stopRingback();
@@ -685,6 +758,7 @@ class MobileCallManager {
     if (uid) set(ref(db, `users/${uid}/incoming_call`), null);
 
     this.activeCall = null;
+    if (this.fullScreenRequested) { this.fullScreenRequested = false; nativeCall.overLock(false); }
     this.isMuted = false;
     this.isVideoOff = false;
     this.isSpeakerOn = false;

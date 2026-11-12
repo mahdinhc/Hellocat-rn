@@ -104,27 +104,16 @@ export default {
             body: JSON.stringify({
               message: {
                 token: t,
-                notification: { title, body: text },
                 data: {
                   type: 'incoming_call',
                   callId,
                   callerId: caller,
                   callerName,
+                  callerPic: String((sender && (sender.profile_picture || sender.profile_photo)) || ''),
                   callType: callType || 'audio',
                   cid: cid || '',
                 },
-                android: {
-                  priority: 'HIGH',
-                  notification: {
-                    channel_id: 'calls_v2',
-                    color: '#22c55e',
-                    sound: 'ringtone',
-                    tag: `call_${callId}`,
-                    notification_priority: 'PRIORITY_MAX',
-                    sticky: true,
-                    visibility: 'PUBLIC',
-                  },
-                },
+                android: { priority: 'HIGH', ttl: '45s' },
               },
             }),
           });
