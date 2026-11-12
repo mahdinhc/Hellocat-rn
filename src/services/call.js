@@ -157,7 +157,7 @@ class MobileCallManager {
       off(incomingRef, 'value', this.incomingCallListener);
     }
 
-    this.incomingCallListener = onValue(incomingRef, (snapshot) => {
+    this.incomingCallListener = onValue(incomingRef, async (snapshot) => {
       const call = snapshot.val();
       if (!call) {
         if (this.activeCall && !this.activeCall.isCaller && this.activeCall.status === 'ringing') {
@@ -166,9 +166,30 @@ class MobileCallManager {
         return;
       }
 
+      // 1. Time-based expiration check (calls older than 45 seconds are stale)
       if (call.timestamp && Date.now() - call.timestamp > 45000) {
-        set(incomingRef, null);
+        set(incomingRef, null).catch(() => {});
         return;
+      }
+
+      // 2. Critical: Verify actual call session state in RTDB before triggering ringing UI!
+      // If the caller already hung up, missed, cancelled, or the call ended long ago, do NOT ring!
+      if (call.callId) {
+        try {
+          const sessionSnap = await get(ref(db, `calls/${call.callId}`));
+          if (!sessionSnap.exists()) {
+            set(incomingRef, null).catch(() => {});
+            return;
+          }
+          const session = sessionSnap.val();
+          const inactiveStatuses = ['ended', 'missed', 'rejected', 'no_answer', 'cancelled', 'busy'];
+          if (inactiveStatuses.includes(session.status)) {
+            set(incomingRef, null).catch(() => {});
+            return;
+          }
+        } catch (e) {
+          console.warn('Error verifying incoming call session status:', e);
+        }
       }
 
       // Simultaneous dial tie-breaker
@@ -246,6 +267,10 @@ class MobileCallManager {
       }
     }, 35000);
 
+    // Actively listen to the call session while ringing!
+    // If the caller cancels or hangs up before answer, this dismisses the incoming UI immediately.
+    this.listenToCallSession(call.callId);
+
     this.notifySubscribers();
 
     if (this.pendingAnswerId && this.pendingAnswerId === call.callId) {
@@ -311,7 +336,8 @@ class MobileCallManager {
     if (this.ringTimeout) clearTimeout(this.ringTimeout);
     this.ringTimeout = setTimeout(() => {
       if (this.activeCall && this.activeCall.status === 'calling') {
-        update(ref(db, `calls/${callKey}`), { status: 'no_answer' });
+        update(ref(db, `calls/${callKey}`), { status: 'no_answer' }).catch(() => {});
+        if (fid) set(ref(db, `users/${fid}/incoming_call`), null).catch(() => {});
         setTimeout(() => this.cleanup(), 1000);
       }
     }, 35000);
@@ -598,6 +624,8 @@ class MobileCallManager {
           this.notifySubscribers();
         }
       } else if (call.status === 'rejected' || call.status === 'busy' || call.status === 'no_answer' || call.status === 'missed' || call.status === 'ended') {
+        const uid = auth.currentUser?.uid;
+        if (uid) set(ref(db, `users/${uid}/incoming_call`), null).catch(() => {});
         this.cleanup();
       } else if (call.status === 'yield') {
         this.cleanupStateOnly();
