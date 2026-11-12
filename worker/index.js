@@ -53,12 +53,39 @@ function bodyFor(m, preview) {
   return 'Sent you a message';
 }
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 const reply = (status, body) => new Response(JSON.stringify(body || {}), { status, headers: { 'Content-Type': 'application/json', ...cors } });
+
+async function imagekitAuth(env) {
+  const privateKey = env.IMAGEKIT_PRIVATE_KEY || 'private_nmjCsNOJie6gmY8GtCnrvYNiR4w=';
+  const token = crypto.randomUUID();
+  const expire = Math.floor(Date.now() / 1000) + 1800; // 30 mins
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(privateKey),
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign']
+  );
+  const signatureBytes = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(token + expire));
+  const signature = Array.from(new Uint8Array(signatureBytes)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return { token, expire, signature };
+}
 
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+
+    const url = new URL(request.url);
+    if (url.pathname === '/imagekit-auth') {
+      try {
+        const authData = await imagekitAuth(env);
+        return reply(200, authData);
+      } catch (err) {
+        return reply(500, { error: 'Failed to generate auth token' });
+      }
+    }
+
     if (request.method !== 'POST') return reply(405);
     let body;
     try { body = await request.json(); } catch (e) { return reply(400); }
