@@ -362,6 +362,8 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
+import androidx.core.graphics.drawable.IconCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import java.net.HttpURLConnection
@@ -499,25 +501,19 @@ object CallNotifier {
                 .setContentIntent(open)
                 .setFullScreenIntent(open, true)
 
-            if (banner) {
-                val rv = RemoteViews(ctx.packageName, R.layout.nc_incoming_call)
-                rv.setTextViewText(R.id.nc_title, title)
-                rv.setTextViewText(R.id.nc_sub, sub)
-                if (avatar != null) rv.setImageViewBitmap(R.id.nc_avatar, avatar)
-                rv.setOnClickPendingIntent(R.id.nc_accept, answer)
-                rv.setOnClickPendingIntent(R.id.nc_decline, decline)
-                rv.setOnClickPendingIntent(R.id.nc_root, open)
-                b.setCustomContentView(rv)
-                b.setCustomHeadsUpContentView(rv)
-                b.setCustomBigContentView(rv)
-                // plain custom view without system container decoration
-            } else {
-                b.setContentTitle(title)
-                b.setContentText(sub)
-                if (avatar != null) b.setLargeIcon(avatar)
-                b.addAction(0, "Decline", decline)
-                b.addAction(0, "Answer", answer)
-            }
+            val callerPerson = Person.Builder()
+                .setName(title)
+                .setImportant(true)
+                .also { if (avatar != null) it.setIcon(IconCompat.createWithBitmap(avatar)) }
+                .build()
+
+            val callStyle = NotificationCompat.CallStyle.forIncomingCall(callerPerson, decline, answer)
+                .setIsVideo(isVideo)
+
+            b.setStyle(callStyle)
+            b.setContentTitle(title)
+            b.setContentText(sub)
+            if (avatar != null) b.setLargeIcon(avatar)
 
             val n = b.build()
             if (sound) n.flags = n.flags or Notification.FLAG_INSISTENT
