@@ -34,7 +34,10 @@
         "READ_MEDIA_AUDIO",
         "USE_FULL_SCREEN_INTENT",
         "WAKE_LOCK",
-        "MANAGE_EXTERNAL_STORAGE"
+        "MANAGE_EXTERNAL_STORAGE",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MICROPHONE",
+        "FOREGROUND_SERVICE_PHONE_CALL"
       ]
     },
     "plugins": [

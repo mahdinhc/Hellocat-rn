@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Image, TouchableOpacity, Linking, Text } from 'react-native';
+import React, { useState } from 'react';
+import { View, Image, TouchableOpacity, Linking, Text, Dimensions, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ref, set, remove, serverTimestamp } from 'firebase/database';
 import { db } from '../firebase';
@@ -9,36 +9,93 @@ import { useTheme } from '../theme/ThemeContext';
 import { AppText, Avatar, Row, Card } from '../components/ui';
 import { useUser } from '../services/users';
 import { userDisplayName, timeAgo, formatNumber } from '../utils';
+import { renderHellocatString } from '../services/hellocatString';
 
-// Renders text with clickable links and coloured #hashtags
+// Renders text with full Hellocat-String support (bold, italic, underline, strike, hashtags, links, mentions)
 export function RichText({ text, style, size }) {
   const { theme } = useTheme();
-  const parts = String(text || '').split(/(https?:\/\/[^\s]+|#[\p{L}\p{N}_-]+)/gu);
   return (
     <AppText size={size} style={style}>
-      {parts.map((p, i) => {
-        if (/^https?:\/\//.test(p)) return <Text key={i} style={{ color: theme.link, textDecorationLine: 'underline' }} onPress={() => { Linking.openURL(p).catch(() => {}); }}>{p}</Text>;
-        if (p.startsWith('#') && p.length > 1) return <Text key={i} style={{ color: theme.link }}>{p}</Text>;
-        return <Text key={i}>{p}</Text>;
+      {renderHellocatString(text, {
+        linkStyle: { color: theme.link },
+        hashtagStyle: { color: theme.link },
+        userStyle: { color: theme.link },
+        textColor: style?.color || theme.text,
       })}
     </AppText>
   );
 }
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Multi-image Slide Scroll attachment viewer for media/posts
 export function Attachments({ items }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+
   if (!Array.isArray(items) || !items.length) return null;
+
+  const images = items.filter((a) => a && safeUri(a.src) && typeof a.type === 'string' && a.type.startsWith('image'));
+  const otherFiles = items.filter((a) => !(a && safeUri(a.src) && typeof a.type === 'string' && a.type.startsWith('image')));
+
+  const cardWidth = Math.min(SCREEN_WIDTH - 56, 420);
+
   return (
     <View style={{ marginTop: 8 }}>
-      {items.map((a, i) => {
-        if (a && safeUri(a.src) && typeof a.type === 'string' && a.type.startsWith('image')) {
-          return <Image key={i} source={{ uri: safeUri(a.src) }} style={{ width: '100%', height: 220, borderRadius: 8, marginBottom: 6 }} resizeMode="cover" />;
-        }
-        return (
-          <TouchableOpacity key={i} onPress={() => { if (a && safeUri(a.src)) Linking.openURL(a.src).catch(() => {}); }} style={{ paddingVertical: 6 }}>
-            <Row><Ionicons name="attach" size={18} color="#888" /><AppText muted style={{ marginLeft: 4, textDecorationLine: 'underline' }}>{(a && a.name) || 'Attachment'} ({(a && a.type) || 'file'})</AppText></Row>
-          </TouchableOpacity>
-        );
-      })}
+      {images.length > 0 ? (
+        <View style={{ width: '100%', marginBottom: 6 }}>
+          {images.length === 1 ? (
+            <TouchableOpacity activeOpacity={0.9} onPress={() => Linking.openURL(safeUri(images[0].src)).catch(() => {})}>
+              <Image source={{ uri: safeUri(images[0].src) }} style={{ width: '100%', height: 240, borderRadius: 10 }} resizeMode="cover" />
+            </TouchableOpacity>
+          ) : (
+            <View>
+              <FlatList
+                data={images}
+                keyExtractor={(_, i) => String(i)}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                snapToAlignment="center"
+                decelerationRate="fast"
+                onMomentumScrollEnd={(e) => {
+                  const x = e.nativeEvent.contentOffset.x;
+                  const idx = Math.round(x / cardWidth);
+                  setActiveIndex(idx);
+                }}
+                renderItem={({ item }) => (
+                  <TouchableOpacity activeOpacity={0.9} onPress={() => Linking.openURL(safeUri(item.src)).catch(() => {})} style={{ width: cardWidth, marginRight: 8 }}>
+                    <Image source={{ uri: safeUri(item.src) }} style={{ width: '100%', height: 260, borderRadius: 10 }} resizeMode="cover" />
+                  </TouchableOpacity>
+                )}
+              />
+              {/* Pagination Dots */}
+              <Row style={{ justifyContent: 'center', marginTop: 8 }}>
+                {images.map((_, i) => (
+                  <View
+                    key={i}
+                    style={{
+                      width: i === activeIndex ? 16 : 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: i === activeIndex ? '#5d8ffc' : 'rgba(150,150,150,0.4)',
+                      marginHorizontal: 3,
+                    }}
+                  />
+                ))}
+              </Row>
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {otherFiles.map((a, i) => (
+        <TouchableOpacity key={i} onPress={() => { if (a && safeUri(a.src)) Linking.openURL(a.src).catch(() => {}); }} style={{ paddingVertical: 6 }}>
+          <Row>
+            <Ionicons name="attach" size={18} color="#888" />
+            <AppText muted style={{ marginLeft: 4, textDecorationLine: 'underline' }}>{(a && a.name) || 'Attachment'} ({(a && a.type) || 'file'})</AppText>
+          </Row>
+        </TouchableOpacity>
+      ))}
     </View>
   );
 }
@@ -50,13 +107,13 @@ export function useBlogMeta(id) {
     const r = safeRef('blogs', id);
     if (!r) return undefined;
     return safeOnValue(r, (s) => {
-    const reacts = s.child('reacts');
-    setMeta({
-      likes: reacts.numChildren(),
-      comments: s.child('comments').numChildren(),
-      views: Number(s.child('views').val()) || 0,
-      mine: !!uid && reacts.child(uid).exists(),
-    });
+      const reacts = s.child('reacts');
+      setMeta({
+        likes: reacts.numChildren(),
+        comments: s.child('comments').numChildren(),
+        views: Number(s.child('views').val()) || 0,
+        mine: !!uid && reacts.child(uid).exists(),
+      });
     });
   }, [id, uid]);
   return meta;
@@ -98,13 +155,16 @@ export function BlogCard({ post, navigation, showAuthor = true, detail = false }
       <Row style={{ marginTop: 12 }}>
         <TouchableOpacity onPress={() => toggleLike(post.id, uid, meta.mine)} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 22 }}>
           <Ionicons name={meta.mine ? 'heart' : 'heart-outline'} size={22} color={meta.mine ? '#e5484d' : theme.cardText} />
-          <AppText size={13} style={{ marginLeft: 5, color: theme.cardText }}>{formatNumber(meta.likes)}</AppText>
+          {meta.likes > 0 ? <AppText size={13} style={{ marginLeft: 6, color: theme.cardText }}>{formatNumber(meta.likes)}</AppText> : null}
         </TouchableOpacity>
         <TouchableOpacity onPress={open} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 22 }}>
           <Ionicons name="chatbubble-outline" size={20} color={theme.cardText} />
-          <AppText size={13} style={{ marginLeft: 5, color: theme.cardText }}>{formatNumber(meta.comments)}</AppText>
+          {meta.comments > 0 ? <AppText size={13} style={{ marginLeft: 6, color: theme.cardText }}>{formatNumber(meta.comments)}</AppText> : null}
         </TouchableOpacity>
-        <Row><Ionicons name="eye-outline" size={20} color={theme.cardText} /><AppText size={13} style={{ marginLeft: 5, color: theme.cardText }}>{formatNumber(meta.views)}</AppText></Row>
+        <Row style={{ alignItems: 'center' }}>
+          <Ionicons name="eye-outline" size={20} color={theme.cardText} style={{ opacity: 0.7 }} />
+          {meta.views > 0 ? <AppText size={13} muted style={{ marginLeft: 6 }}>{formatNumber(meta.views)}</AppText> : null}
+        </Row>
       </Row>
     </Card>
   );

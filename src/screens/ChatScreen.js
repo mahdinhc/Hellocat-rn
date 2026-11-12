@@ -17,10 +17,13 @@ import { setActiveChat } from '../services/notifications';
 import { callManager } from '../services/call';
 import { cacheChatMessages, getCachedChatMessages } from '../services/offlineStorage';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { renderHellocatString } from '../services/hellocatString';
 
 const PAGE = 40;
 
-const POPULAR_REACTS = [
+
+const DEFAULT_REACTS = [
   { code: 'u2764', emoji: '❤️' },
   { code: 'u1f602', emoji: '😂' },
   { code: 'u1f62e', emoji: '😮' },
@@ -28,6 +31,58 @@ const POPULAR_REACTS = [
   { code: 'u1f44d', emoji: '👍' },
   { code: 'u1f525', emoji: '🔥' },
 ];
+
+const PRESET_REACTION_SETS = [
+  {
+    name: 'Demon',
+    icon: '😈',
+    reacts: [
+      { code: 'u1f608', emoji: '😈' },
+      { code: 'u1f47f', emoji: '👿' },
+      { code: 'u1f480', emoji: '💀' },
+      { code: 'u2620', emoji: '☠️' },
+      { code: 'u1f525', emoji: '🔥' },
+      { code: 'u1f921', emoji: '🤡' },
+    ],
+  },
+  {
+    name: 'Hellocat',
+    icon: '🐱',
+    reacts: [
+      { code: 'u1f63a', emoji: '😺' },
+      { code: 'u1f638', emoji: '😸' },
+      { code: 'u1f63b', emoji: '😻' },
+      { code: 'u1f63c', emoji: '😼' },
+      { code: 'u1f640', emoji: '🙀' },
+      { code: 'u1f63e', emoji: '😾' },
+    ],
+  },
+  {
+    name: 'Love & Hearts',
+    icon: '💖',
+    reacts: [
+      { code: 'u2764', emoji: '❤️' },
+      { code: 'u1f496', emoji: '💖' },
+      { code: 'u1f49e', emoji: '💞' },
+      { code: 'u1f48b', emoji: '💋' },
+      { code: 'u1f970', emoji: '🥰' },
+      { code: 'u1f60d', emoji: '😍' },
+    ],
+  },
+  {
+    name: 'Fun & Cool',
+    icon: '😎',
+    reacts: [
+      { code: 'u1f60e', emoji: '😎' },
+      { code: 'u1f973', emoji: '🥳' },
+      { code: 'u1f911', emoji: '🤑' },
+      { code: 'u1f4af', emoji: '💯' },
+      { code: 'u2728', emoji: '✨' },
+      { code: 'u1f389', emoji: '🎉' },
+    ],
+  },
+];
+
 
 function codeToChar(code) {
   if (!code) return '❤️';
@@ -81,7 +136,20 @@ function Bubble({ m, mine, replied, onLongPress, onToggleReact, currentUid, them
   } else if (m.type === 'emoji') {
     body = <AppText size={(m.size || 40) / 2} style={{ color: fg }}>:{m.emoji}:</AppText>;
   } else {
-    body = <AppText style={{ color: fg }}>{m.data}</AppText>;
+    body = (
+      <AppText style={{ color: fg }}>
+        {renderHellocatString(m.data, {
+          linkStyle: { color: mine ? '#fff' : theme.link, textDecorationLine: 'underline' },
+          hashtagStyle: { color: mine ? '#fff' : theme.link, fontWeight: 'bold' },
+          userStyle: { color: mine ? '#fff' : theme.link, fontWeight: 'bold' },
+          boldStyle: { fontWeight: 'bold', color: fg },
+          italicStyle: { fontStyle: 'italic', color: fg },
+          underlineStyle: { textDecorationLine: 'underline', color: fg },
+          strikeStyle: { textDecorationLine: 'line-through', color: fg },
+          textColor: fg,
+        })}
+      </AppText>
+    );
   }
 
   // Aggregate reacts
@@ -170,7 +238,26 @@ export default function ChatScreen({ route, navigation }) {
   const [online, setOnline] = useState(false);
   const [friendTyping, setFriendTyping] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [activeReacts, setActiveReacts] = useState(DEFAULT_REACTS);
+  const [customizerVisible, setCustomizerVisible] = useState(false);
   const typingTimer = useRef(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem('@hellocat_custom_reactions').then((val) => {
+      if (val) {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed) && parsed.length > 0) setActiveReacts(parsed);
+        } catch (e) {}
+      }
+    }).catch(() => {});
+  }, []);
+
+  const selectReactionSet = (rSet) => {
+    setActiveReacts(rSet.reacts);
+    AsyncStorage.setItem('@hellocat_custom_reactions', JSON.stringify(rSet.reacts)).catch(() => {});
+    setCustomizerVisible(false);
+  };
 
   useEffect(() => {
     if (!cid && fid) getOrCreateChat(uid, fid).then((c) => { if (isValidKey(c)) setCid(c); else Alert.alert('Error', 'This conversation could not be opened.'); }).catch((e) => Alert.alert('Error', (e && e.message) || 'Could not open chat'));
@@ -411,8 +498,8 @@ export default function ChatScreen({ route, navigation }) {
         <Pressable onPress={closeMenu} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '85%', maxWidth: 340, backgroundColor: theme.card || '#232323', borderRadius: 20, padding: 16, elevation: 10 }}>
             {/* Quick reaction row */}
-            <Row style={{ justifyContent: 'space-around', paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: theme.border || '#333', marginBottom: 10 }}>
-              {POPULAR_REACTS.map((r) => {
+            <Row style={{ justifyContent: 'space-between', alignItems: 'center', paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: theme.border || '#333', marginBottom: 10 }}>
+              {activeReacts.map((r) => {
                 const isSelected = selectedMessage?.reacts && selectedMessage.reacts[uid]?.type === r.code;
                 return (
                   <TouchableOpacity
@@ -423,9 +510,9 @@ export default function ChatScreen({ route, navigation }) {
                       closeMenu();
                     }}
                     style={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: 21,
+                      width: 38,
+                      height: 38,
+                      borderRadius: 19,
                       backgroundColor: isSelected ? (theme.link + '33') : (theme.bg || '#1a1a1a'),
                       borderWidth: isSelected ? 2 : 1,
                       borderColor: isSelected ? theme.link : (theme.border || '#444'),
@@ -433,10 +520,29 @@ export default function ChatScreen({ route, navigation }) {
                       alignItems: 'center',
                     }}
                   >
-                    <AppText size={22}>{r.emoji}</AppText>
+                    <AppText size={20}>{r.emoji}</AppText>
                   </TouchableOpacity>
                 );
               })}
+              {/* Customize Reactions '+' button */}
+              <TouchableOpacity
+                activeOpacity={0.6}
+                onPress={() => {
+                  setCustomizerVisible(true);
+                }}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  backgroundColor: theme.bg || '#1a1a1a',
+                  borderWidth: 1,
+                  borderColor: theme.link,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }}
+              >
+                <Ionicons name="add" size={22} color={theme.link} />
+              </TouchableOpacity>
             </Row>
 
             {/* Actions list */}
@@ -463,6 +569,80 @@ export default function ChatScreen({ route, navigation }) {
               <Ionicons name="close-circle-outline" size={20} color={theme.textMuted || '#888'} style={{ marginRight: 12 }} />
               <AppText size={15} muted>Close</AppText>
             </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Reaction Set Customizer Modal */}
+      <Modal visible={customizerVisible} transparent animationType="fade" onRequestClose={() => setCustomizerVisible(false)}>
+        <Pressable onPress={() => setCustomizerVisible(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '90%', maxWidth: 360, backgroundColor: theme.card || '#232323', borderRadius: 20, padding: 18, elevation: 12 }}>
+            <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <AppText bold size={17}>Customize Reactions</AppText>
+              <TouchableOpacity onPress={() => setCustomizerVisible(false)}>
+                <Ionicons name="close" size={24} color={theme.text} />
+              </TouchableOpacity>
+            </Row>
+            <AppText size={13} muted style={{ marginBottom: 14 }}>Select a reaction pack for your quick reaction bar:</AppText>
+
+            {/* Default / Classic Pack */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => selectReactionSet({ name: 'Default', reacts: DEFAULT_REACTS })}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingVertical: 10,
+                paddingHorizontal: 12,
+                borderRadius: 12,
+                backgroundColor: theme.bg || '#1a1a1a',
+                marginBottom: 10,
+                borderWidth: 1,
+                borderColor: theme.border || '#333',
+              }}
+            >
+              <Row style={{ alignItems: 'center' }}>
+                <AppText size={20} style={{ marginRight: 8 }}>❤️</AppText>
+                <AppText bold size={14}>Classic HelloCat</AppText>
+              </Row>
+              <Row style={{ gap: 4 }}>
+                {DEFAULT_REACTS.slice(0, 4).map((r) => (
+                  <AppText key={r.code} size={15}>{r.emoji}</AppText>
+                ))}
+              </Row>
+            </TouchableOpacity>
+
+            {/* Preset reaction packs: Demon, Hellocat, Love, Fun */}
+            {PRESET_REACTION_SETS.map((p) => (
+              <TouchableOpacity
+                key={p.name}
+                activeOpacity={0.7}
+                onPress={() => selectReactionSet(p)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: 12,
+                  backgroundColor: theme.bg || '#1a1a1a',
+                  marginBottom: 10,
+                  borderWidth: 1,
+                  borderColor: theme.border || '#333',
+                }}
+              >
+                <Row style={{ alignItems: 'center' }}>
+                  <AppText size={20} style={{ marginRight: 8 }}>{p.icon}</AppText>
+                  <AppText bold size={14}>{p.name}</AppText>
+                </Row>
+                <Row style={{ gap: 4 }}>
+                  {p.reacts.slice(0, 4).map((r) => (
+                    <AppText key={r.code} size={15}>{r.emoji}</AppText>
+                  ))}
+                </Row>
+              </TouchableOpacity>
+            ))}
           </Pressable>
         </Pressable>
       </Modal>

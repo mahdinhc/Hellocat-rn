@@ -1,4 +1,4 @@
-// Thin wrapper around the native call helpers (notification pill, ringer mode, lock-screen mode, tones).
+// Thin wrapper around the native call helpers (notification pill, ringer mode, lock-screen mode, tones, background keep-alive).
 // Every call is safe to make when the native module is missing (old APK / iOS).
 import { NativeModules, Platform } from 'react-native';
 
@@ -28,6 +28,20 @@ export const nativeCall = {
     try {
       if (ok && Native.playFeedbackTone) {
         Native.playFeedbackTone(toneType);
+      }
+    } catch (e) {}
+  },
+  startKeepAlive(title = 'HelloCat Call') {
+    try {
+      if (ok && Native.startCallKeepAlive) {
+        Native.startCallKeepAlive(title);
+      }
+    } catch (e) {}
+  },
+  stopKeepAlive() {
+    try {
+      if (ok && Native.stopCallKeepAlive) {
+        Native.stopCallKeepAlive();
       }
     } catch (e) {}
   },

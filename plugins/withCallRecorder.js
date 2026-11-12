@@ -590,6 +590,104 @@ class CallFcmService : FirebaseMessagingService() {
     }
 }
 
+
+// Call Keep-Alive Foreground Service: prevents Android system from throttling/suspending WebRTC mic & socket when app is backgrounded
+class CallKeepAliveService : android.app.Service() {
+    companion object {
+        private const val CHANNEL_ID = "call_ongoing_active_channel"
+        private const val NOTIF_ID = 91024
+        private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+        fun start(ctx: Context, title: String) {
+            try {
+                val i = Intent(ctx, CallKeepAliveService::class.java).apply { putExtra("title", title) }
+                if (Build.VERSION.SDK_INT >= 26) {
+                    ctx.startForegroundService(i)
+                } else {
+                    ctx.startService(i)
+                }
+            } catch (t: Throwable) {}
+        }
+
+        fun stop(ctx: Context) {
+            try {
+                ctx.stopService(Intent(ctx, CallKeepAliveService::class.java))
+            } catch (t: Throwable) {}
+        }
+    }
+
+    override fun onBind(intent: Intent?) = null
+
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "hellocat:CallKeepAliveWakeLock").apply {
+                setReferenceCounted(false)
+                acquire(4 * 60 * 60 * 1000L) // up to 4 hours maximum call
+            }
+        } catch (t: Throwable) {}
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val title = intent?.getStringExtra("title") ?: "Ongoing Call"
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= 26) {
+                if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+                    val ch = NotificationChannel(CHANNEL_ID, "Active Calls", NotificationManager.IMPORTANCE_LOW).apply {
+                        description = "Keeps voice and connection active in background"
+                        setShowBadge(false)
+                    }
+                    nm.createNotificationChannel(ch)
+                }
+            }
+
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pending = PendingIntent.getActivity(this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
+
+            val icon = resources.getIdentifier("notification_icon", "drawable", packageName).let { if (it == 0) android.R.drawable.sym_call_outgoing else it }
+
+            val b = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(icon)
+                .setContentTitle(title)
+                .setContentText("Call in progress • Mic & audio active")
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pending)
+                .setColor(0xFF5CC43C.toInt())
+
+            val notif = b.build()
+
+            if (Build.VERSION.SDK_INT >= 30) {
+                var fst = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                if (Build.VERSION.SDK_INT >= 34) {
+                    fst = fst or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                }
+                startForeground(NOTIF_ID, notif, fst)
+            } else {
+                startForeground(NOTIF_ID, notif)
+            }
+        } catch (t: Throwable) {
+            Log.w("CallKeepAliveService", "startForeground failed: " + t)
+        }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        try {
+            wakeLock?.let { if (it.isHeld) it.release() }
+            wakeLock = null
+        } catch (t: Throwable) {}
+        try {
+            stopForeground(true)
+        } catch (t: Throwable) {}
+        super.onDestroy()
+    }
+}
+
 object CallWindow {
     // When MainActivity is opened from a call notification, show it over the lock screen and wake the screen.
     // Also dismiss the notification immediately since the user opened the app.
@@ -825,6 +923,16 @@ class CallRecorderModule(ctx: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
+    fun startCallKeepAlive(title: String) {
+        CallKeepAliveService.start(reactApplicationContext, title)
+    }
+
+    @ReactMethod
+    fun stopCallKeepAlive() {
+        CallKeepAliveService.stop(reactApplicationContext)
+    }
+
+    @ReactMethod
     fun showOverLockScreen(on: Boolean) {
         try {
             val a = currentActivity ?: return
@@ -921,6 +1029,16 @@ module.exports = function withCallRecorder(config) {
     const has = (n) => app.service.some((x) => x.$ && x.$['android:name'] === n);
     const expoSvc = 'expo.modules.notifications.service.ExpoFirebaseMessagingService';
     if (!has(expoSvc)) app.service.push({ $: { 'android:name': expoSvc, 'tools:node': 'remove' } });
+    const keepAliveSvc = pkg + '.callrec.CallKeepAliveService';
+    if (!has(keepAliveSvc)) {
+      app.service.push({
+        $: {
+          'android:name': keepAliveSvc,
+          'android:exported': 'false',
+          'android:foregroundServiceType': 'microphone|phoneCall'
+        }
+      });
+    }
     const mine = pkg + '.callrec.CallFcmService';
     if (!has(mine)) {
       app.service.push({

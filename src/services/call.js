@@ -710,6 +710,8 @@ class MobileCallManager {
   startTimer() {
     this.stopTimer();
     this.callDurationSec = 0;
+    const peerName = this.activeCall?.isCaller ? (this.activeCall?.friendName || 'Friend') : (this.activeCall?.callerName || 'Caller');
+    nativeCall.startKeepAlive("Call with " + peerName);
     this.callTimer = setInterval(() => {
       this.callDurationSec++;
       this.notifySubscribers();
@@ -835,6 +837,7 @@ class MobileCallManager {
   }
 
   cleanupStateOnly() {
+    nativeCall.stopKeepAlive();
     this.stopTimer();
     callRecorder.stopRecording().catch(() => {});
     if (this.disconnectTimer) {
