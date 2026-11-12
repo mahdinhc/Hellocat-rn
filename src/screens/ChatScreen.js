@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { FlatList, View, TouchableOpacity, Image, Linking, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
+import { FlatList, View, TouchableOpacity, Image, Linking, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Modal, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -8,7 +8,7 @@ import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText, Avatar, Row, Input, Loading } from '../components/ui';
 import { useUser } from '../services/users';
-import { getOrCreateChat, sendTextMessage, sendFileMessage, removeMessage, markSeen, setTyping, uploadChatFile } from '../services/chat';
+import { getOrCreateChat, sendTextMessage, sendFileMessage, removeMessage, markSeen, setTyping, uploadChatFile, reactToMessage, unreactMessage } from '../services/chat';
 import { userDisplayName, formatClock, isImageType, bytesToLabel } from '../utils';
 import { previewOf } from './ChatsScreen';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -20,7 +20,28 @@ import * as Clipboard from 'expo-clipboard';
 
 const PAGE = 40;
 
-function Bubble({ m, mine, replied, onLongPress, theme }) {
+const POPULAR_REACTS = [
+  { code: 'u2764', emoji: '❤️' },
+  { code: 'u1f602', emoji: '😂' },
+  { code: 'u1f62e', emoji: '😮' },
+  { code: 'u1f622', emoji: '😢' },
+  { code: 'u1f44d', emoji: '👍' },
+  { code: 'u1f525', emoji: '🔥' },
+];
+
+function codeToChar(code) {
+  if (!code) return '❤️';
+  if (code.startsWith('u')) {
+    try {
+      const hex = code.slice(1);
+      const cp = parseInt(hex, 16);
+      if (!isNaN(cp)) return String.fromCodePoint(cp);
+    } catch (e) {}
+  }
+  return code;
+}
+
+function Bubble({ m, mine, replied, onLongPress, onToggleReact, currentUid, theme }) {
   if (m.type === 'event') {
     return <AppText size={12} muted style={{ textAlign: 'center', marginVertical: 8 }}>{previewOf(m, '')}</AppText>;
   }
@@ -62,6 +83,30 @@ function Bubble({ m, mine, replied, onLongPress, theme }) {
   } else {
     body = <AppText style={{ color: fg }}>{m.data}</AppText>;
   }
+
+  // Aggregate reacts
+  const reactsMap = m.reacts || null;
+  const aggregatedReacts = [];
+  if (reactsMap && typeof reactsMap === 'object') {
+    const counts = {};
+    const hasMyReact = {};
+    Object.keys(reactsMap).forEach((rUid) => {
+      const r = reactsMap[rUid];
+      if (!r) return;
+      const t = r.type || 'u2764';
+      counts[t] = (counts[t] || 0) + 1;
+      if (rUid === currentUid) hasMyReact[t] = true;
+    });
+    Object.keys(counts).forEach((type) => {
+      aggregatedReacts.push({
+        type,
+        char: codeToChar(type),
+        count: counts[type],
+        mine: !!hasMyReact[type],
+      });
+    });
+  }
+
   return (
     <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', marginVertical: 2, paddingHorizontal: 10 }}>
       <TouchableOpacity activeOpacity={0.85} onLongPress={() => onLongPress(m)} style={{ maxWidth: '82%', backgroundColor: bg, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 }}>
@@ -76,6 +121,37 @@ function Bubble({ m, mine, replied, onLongPress, theme }) {
           {mine && !m.removed ? <Ionicons name={m.isSeenByReceiver ? 'checkmark-done' : 'checkmark'} size={13} color={fg} style={{ opacity: 0.7, marginLeft: 4 }} /> : null}
         </Row>
       </TouchableOpacity>
+      {aggregatedReacts.length > 0 ? (
+        <Row style={{ flexWrap: 'wrap', marginTop: -6, marginBottom: 4, zIndex: 2, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 6 }}>
+          {aggregatedReacts.map((r) => (
+            <TouchableOpacity
+              key={r.type}
+              activeOpacity={0.7}
+              onPress={() => onToggleReact && onToggleReact(m, r.type)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: r.mine ? (theme.card || '#2a2a2a') : (theme.bg || '#1a1a1a'),
+                borderWidth: 1,
+                borderColor: r.mine ? theme.link : (theme.border || '#333'),
+                borderRadius: 12,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                marginRight: 4,
+                marginBottom: 2,
+                elevation: 2,
+                shadowColor: '#000',
+                shadowOpacity: 0.2,
+                shadowRadius: 2,
+                shadowOffset: { width: 0, height: 1 },
+              }}
+            >
+              <AppText size={12}>{r.char}</AppText>
+              {r.count > 1 ? <AppText size={11} style={{ color: theme.text, marginLeft: 3, fontWeight: '600' }}>{r.count}</AppText> : null}
+            </TouchableOpacity>
+          ))}
+        </Row>
+      ) : null}
     </View>
   );
 }
@@ -245,22 +321,45 @@ export default function ChatScreen({ route, navigation }) {
     { text: 'Cancel', style: 'cancel' },
   ]);
 
-  const onLongPress = useCallback((m) => {
-    const buttons = [];
-    const textToCopy = m.data || m.filename || (m.type === 'call' ? (m.callType === 'video' ? 'Video Call' : 'Audio Call') : '');
-    if (textToCopy) {
-      buttons.push({
-        text: 'Copy Text',
-        onPress: () => {
-          Clipboard.setStringAsync(textToCopy).catch(() => {});
-        },
-      });
+  const [selectedMessage, setSelectedMessage] = useState(null);
+
+  const toggleReact = useCallback((m, reactType) => {
+    if (!cid || !m || !m.key || !uid) return;
+    const currentReact = m.reacts && m.reacts[uid] ? m.reacts[uid].type : null;
+    if (currentReact === reactType) {
+      unreactMessage(cid, m.key, uid).catch(() => {});
+    } else {
+      reactToMessage(cid, m.key, uid, reactType).catch(() => {});
     }
-    buttons.push({ text: 'Reply', onPress: () => setReplyTo(m) });
-    if (m.send_from === uid && !m.removed) buttons.push({ text: 'Delete', style: 'destructive', onPress: () => { removeMessage(cid, m.key).catch(() => {}); } });
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Message', undefined, buttons);
   }, [cid, uid]);
+
+  const onLongPress = useCallback((m) => {
+    if (m.removed) return;
+    setSelectedMessage(m);
+  }, []);
+
+  const closeMenu = () => setSelectedMessage(null);
+
+  const copySelectedText = () => {
+    if (!selectedMessage) return;
+    const textToCopy = selectedMessage.data || selectedMessage.filename || (selectedMessage.type === 'call' ? (selectedMessage.callType === 'video' ? 'Video Call' : 'Audio Call') : '');
+    if (textToCopy) {
+      Clipboard.setStringAsync(textToCopy).catch(() => {});
+    }
+    closeMenu();
+  };
+
+  const replySelected = () => {
+    if (selectedMessage) setReplyTo(selectedMessage);
+    closeMenu();
+  };
+
+  const deleteSelected = () => {
+    if (selectedMessage && selectedMessage.send_from === uid) {
+      removeMessage(cid, selectedMessage.key).catch(() => {});
+    }
+    closeMenu();
+  };
 
   if (!fid) return <Screen><AppText muted style={{ textAlign: 'center', padding: 24 }}>This conversation is not available.</AppText></Screen>;
   if (!msgs) return <Loading />;
@@ -276,7 +375,15 @@ export default function ChatScreen({ route, navigation }) {
           contentContainerStyle={{ paddingVertical: 8 }}
           renderItem={({ item }) => (
             <ErrorBoundary compact name="bubble">
-              <Bubble m={item} mine={item.send_from === uid} replied={item.reply_of ? byKey[item.reply_of] : null} onLongPress={onLongPress} theme={theme} />
+              <Bubble
+                m={item}
+                mine={item.send_from === uid}
+                replied={item.reply_of ? byKey[item.reply_of] : null}
+                onLongPress={onLongPress}
+                onToggleReact={toggleReact}
+                currentUid={uid}
+                theme={theme}
+              />
             </ErrorBoundary>
           )}
           onEndReached={() => { if (msgs.length >= limit) setLimit((l) => l + PAGE); }}
@@ -298,6 +405,67 @@ export default function ChatScreen({ route, navigation }) {
           </TouchableOpacity>
         </Row>
       </KeyboardAvoidingView>
+
+      {/* Message action & reaction overlay */}
+      <Modal visible={!!selectedMessage} transparent animationType="fade" onRequestClose={closeMenu}>
+        <Pressable onPress={closeMenu} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '85%', maxWidth: 340, backgroundColor: theme.card || '#232323', borderRadius: 20, padding: 16, elevation: 10 }}>
+            {/* Quick reaction row */}
+            <Row style={{ justifyContent: 'space-around', paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: theme.border || '#333', marginBottom: 10 }}>
+              {POPULAR_REACTS.map((r) => {
+                const isSelected = selectedMessage?.reacts && selectedMessage.reacts[uid]?.type === r.code;
+                return (
+                  <TouchableOpacity
+                    key={r.code}
+                    activeOpacity={0.6}
+                    onPress={() => {
+                      toggleReact(selectedMessage, r.code);
+                      closeMenu();
+                    }}
+                    style={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: 21,
+                      backgroundColor: isSelected ? (theme.link + '33') : (theme.bg || '#1a1a1a'),
+                      borderWidth: isSelected ? 2 : 1,
+                      borderColor: isSelected ? theme.link : (theme.border || '#444'),
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <AppText size={22}>{r.emoji}</AppText>
+                  </TouchableOpacity>
+                );
+              })}
+            </Row>
+
+            {/* Actions list */}
+            {(selectedMessage?.data || selectedMessage?.filename) ? (
+              <TouchableOpacity onPress={copySelectedText} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
+                <Ionicons name="copy-outline" size={20} color={theme.text} style={{ marginRight: 12 }} />
+                <AppText size={15} style={{ color: theme.text }}>Copy Text</AppText>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity onPress={replySelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
+              <Ionicons name="arrow-undo-outline" size={20} color={theme.link} style={{ marginRight: 12 }} />
+              <AppText size={15} style={{ color: theme.link }}>Reply</AppText>
+            </TouchableOpacity>
+
+            {selectedMessage?.send_from === uid && !selectedMessage?.removed ? (
+              <TouchableOpacity onPress={deleteSelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
+                <Ionicons name="trash-outline" size={20} color="#ff6c61" style={{ marginRight: 12 }} />
+                <AppText size={15} style={{ color: "#ff6c61" }}>Delete Message</AppText>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity onPress={closeMenu} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, marginTop: 4, borderTopWidth: 1, borderTopColor: theme.border || '#333' }}>
+              <Ionicons name="close-circle-outline" size={20} color={theme.textMuted || '#888'} style={{ marginRight: 12 }} />
+              <AppText size={15} muted>Close</AppText>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Screen>
   );
 }

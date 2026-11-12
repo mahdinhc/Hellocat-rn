@@ -492,8 +492,8 @@ object CallNotifier {
                 .setSmallIcon(icon)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setOngoing(true)
-                .setAutoCancel(false)
+                .setOngoing(false)
+                .setAutoCancel(true)
                 .setOnlyAlertOnce(quiet)
                 .setTimeoutAfter(40000)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -537,6 +537,7 @@ object CallNotifier {
                     nm.cancel(id.hashCode())
                 }
                 live.clear()
+                nm.cancelAll()
             }
         } catch (t: Throwable) {}
     }
@@ -561,12 +562,17 @@ class CallFcmService : FirebaseMessagingService() {
 
 object CallWindow {
     // When MainActivity is opened from a call notification, show it over the lock screen and wake the screen.
+    // Also dismiss the notification immediately since the user opened the app.
     fun apply(a: Activity) {
         try {
             val d = a.intent?.data
-            if (d != null && d.scheme == "hellocat" && d.host == "call" && Build.VERSION.SDK_INT >= 27) {
-                a.setShowWhenLocked(true)
-                a.setTurnScreenOn(true)
+            if (d != null && d.scheme == "hellocat" && d.host == "call") {
+                val callId = d.getQueryParameter("callId")
+                CallNotifier.cancel(a, callId)
+                if (Build.VERSION.SDK_INT >= 27) {
+                    a.setShowWhenLocked(true)
+                    a.setTurnScreenOn(true)
+                }
             }
         } catch (t: Throwable) {}
     }
@@ -903,6 +909,16 @@ module.exports = function withCallRecorder(config) {
     let c = cfg.modResults.contents;
     if (cfg.modResults.language === 'kt' && !c.includes('CallWindow.apply')) {
       c = c.replace(/super\.onCreate\([^)]*\)/, (m) => m + '\n    ' + pkg + '.callrec.CallWindow.apply(this)');
+    }
+    if (cfg.modResults.language === 'kt' && !c.includes('CallWindow.apply(this) // onNewIntent')) {
+      if (c.includes('override fun onNewIntent(')) {
+        c = c.replace(/super\.onNewIntent\([^)]*\)/, (m) => m + '\n    ' + pkg + '.callrec.CallWindow.apply(this) // onNewIntent');
+      } else {
+        const lastBrace = c.lastIndexOf('}');
+        if (lastBrace !== -1) {
+          c = c.slice(0, lastBrace) + '\n  override fun onNewIntent(intent: android.content.Intent?) {\n    super.onNewIntent(intent)\n    setIntent(intent)\n    ' + pkg + '.callrec.CallWindow.apply(this) // onNewIntent\n  }\n' + c.slice(lastBrace);
+        }
+      }
     }
     cfg.modResults.contents = c;
     return cfg;

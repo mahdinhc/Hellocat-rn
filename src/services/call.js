@@ -103,10 +103,16 @@ class MobileCallManager {
     this.listenForIncomingCalls(uid);
     if (!this.appStateSub) {
       this.appStateSub = AppState.addEventListener('change', (st) => {
-        // App came to the front while a call is ringing (notification was showing): switch to the in-app ring
+        // App came to the front: clear any lingering incoming-call notification immediately
+        if (st === 'active') {
+          nativeCall.cancel('');
+          dismissIncomingCall();
+        }
+        // App came to the front while a call is ringing: switch to the in-app ring
         const c = this.activeCall;
         if (st === 'active' && c && !c.isCaller && c.status === 'ringing' && this.pendingAnswerId !== c.callId) {
           nativeCall.cancel(c.callId);
+          dismissIncomingCall(c.callId);
           this.startInAppRing();
         }
       });
@@ -132,6 +138,11 @@ class MobileCallManager {
       const q = {};
       (m[2] || '').split('&').forEach((kv) => { const [k, v] = kv.split('='); if (k) q[k] = decodeURIComponent(v || ''); });
       const id = q.callId;
+      // When user interacts with the notification (answer, decline, or taps it to open), dismiss notifications immediately
+      nativeCall.cancel(id);
+      nativeCall.cancel('');
+      dismissIncomingCall(id);
+      dismissIncomingCall();
       this.fullScreenRequested = true;
       nativeCall.overLock(true);
       setTimeout(() => { if (!this.activeCall) { this.fullScreenRequested = false; this.notifySubscribers(); } }, 60000);

@@ -49,6 +49,19 @@ export function removeMessage(cid, mid) {
   return update(ref(db, `chats_data/${cid}/messages/${mid}`), { removed: true, data: null, url: null });
 }
 
+export function reactToMessage(cid, mid, uid, type = 'u2764') {
+  return update(ref(db, `chats_data/${cid}/messages/${mid}/reacts`), {
+    [uid]: {
+      timestamp: serverTimestamp(),
+      type: type,
+    },
+  });
+}
+
+export function unreactMessage(cid, mid, uid) {
+  return remove(ref(db, `chats_data/${cid}/messages/${mid}/reacts/${uid}`));
+}
+
 export function markSeen(cid, mid) {
   return update(ref(db, `chats_data/${cid}/messages/${mid}`), { isSeenByReceiver: true, seenByReceiverAt: serverTimestamp() }).catch(() => {});
 }
