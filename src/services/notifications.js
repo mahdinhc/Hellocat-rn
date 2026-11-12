@@ -27,6 +27,7 @@ const DEFAULTS = {
   callsEnabled: true,
   callSound: true,
   callVibrate: true,
+  callBanner: true,
 };
 
 let Notifications = null;
@@ -236,8 +237,8 @@ export async function presentIncomingCall(call) {
     await Notifications.scheduleNotificationAsync({
       identifier: `call_${call.callId}`,
       content: {
-        title: call.callerName || 'Friend',
-        body: `Incoming ${isVideo ? 'video' : 'voice'} call · HelloCat`,
+        title: `Incoming ${isVideo ? 'video ' : ''}call`,
+        body: call.callerName || 'Friend',
         data: { type: 'incoming_call', callId: call.callId, callerId: call.callerId, cid: call.cid || '' },
         categoryIdentifier: CALL_CATEGORY,
         sound: false,

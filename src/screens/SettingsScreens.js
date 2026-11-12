@@ -292,6 +292,7 @@ export function SettingsNotificationsScreen() {
           <AppText bold size={13} muted>CALLS</AppText>
         </View>
         <Toggle label="Call notifications" hint="Get notified and wake screen for incoming voice & video calls" k="callsEnabled" />
+        <Toggle label="Incoming call banner" hint="Show a compact banner at the top when HelloCat is open. Turn off to always show the full screen." k="callBanner" />
         <Toggle label="Ringtone" hint="Play ringtone during incoming calls" k="callSound" disabled={!st.callsEnabled} />
         <Toggle label="Call Vibrate" hint="Vibrate phone on incoming calls" k="callVibrate" disabled={!st.callsEnabled} />
 

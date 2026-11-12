@@ -4,71 +4,79 @@ import { Ionicons } from '@expo/vector-icons';
 import { RTCView } from 'react-native-webrtc';
 import { AppText } from './ui';
 import { callManager } from '../services/call';
+import { getNotificationSettings } from '../services/notifications';
 
 
-function PulseRing({ delay }) {
-  const v = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.delay(delay),
-      Animated.timing(v, { toValue: 1, duration: 2200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, []);
+const DEFAULT_AVATAR_BG = '#4b5058';
+
+function AvatarImg({ pic, size, style }) {
+  if (pic) return <Image source={{ uri: pic }} style={[{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#3a3f46' }, style]} />;
   return (
-    <Animated.View
-      pointerEvents="none"
-      style={[styles.pulse, { opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 2.3] }) }] }]}
-    />
+    <View style={[{ width: size, height: size, borderRadius: size / 2, backgroundColor: DEFAULT_AVATAR_BG, alignItems: 'center', justifyContent: 'center' }, style]}>
+      <Ionicons name="person" size={size * 0.5} color="#f1f3f5" />
+    </View>
   );
 }
 
-function IncomingCallScreen({ name, pic, isVideo }) {
-  const bounce = useRef(new Animated.Value(0)).current;
+// Compact pill banner (like a phone's heads-up incoming call). Tap the body to open the full screen.
+function IncomingBanner({ name, pic, isVideo, onExpand }) {
+  const slide = useRef(new Animated.Value(-140)).current;
   useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(bounce, { toValue: -10, duration: 450, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-      Animated.timing(bounce, { toValue: 0, duration: 450, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
+    Animated.spring(slide, { toValue: 0, useNativeDriver: true, damping: 16, stiffness: 160, mass: 0.9 }).start();
   }, []);
-  const src = pic ? { uri: pic } : require('../../assets/blank-profile.png');
+  const top = (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 50) + 8;
+  return (
+    <View pointerEvents="box-none" style={styles.bannerHost}>
+      <Animated.View style={[styles.banner, { marginTop: top, transform: [{ translateY: slide }] }]}>
+        <TouchableOpacity activeOpacity={0.85} onPress={onExpand} style={styles.bannerBody}>
+          <AvatarImg pic={pic} size={52} />
+          <View style={{ flex: 1, marginLeft: 14, marginRight: 8 }}>
+            <AppText style={styles.bannerTitle} numberOfLines={1}>{name}</AppText>
+            <AppText style={styles.bannerSub} numberOfLines={1}>Incoming {isVideo ? 'video' : 'voice'} call</AppText>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity activeOpacity={0.8} style={[styles.bannerBtn, { backgroundColor: '#5cc43c' }]} onPress={() => callManager.acceptCall()}>
+          <Ionicons name={isVideo ? 'videocam' : 'call'} size={22} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity activeOpacity={0.8} style={[styles.bannerBtn, { backgroundColor: '#e0141c', marginLeft: 10 }]} onPress={() => callManager.rejectCall()}>
+          <Ionicons name="call" size={22} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+}
+
+function IncomingCallScreen({ name, pic, isVideo, onCollapse }) {
   return (
     <View style={styles.incomingRoot}>
       <StatusBar barStyle="light-content" />
-      <Image source={src} style={StyleSheet.absoluteFill} blurRadius={Platform.OS === 'ios' ? 40 : 25} resizeMode="cover" />
-      <View style={styles.incomingShade} />
+      {pic ? <Image source={{ uri: pic }} style={StyleSheet.absoluteFill} blurRadius={Platform.OS === 'ios' ? 50 : 30} resizeMode="cover" /> : null}
+      <View style={[styles.incomingShade, !pic && { backgroundColor: '#14171c' }]} />
       <View style={styles.incomingTop}>
-        <View style={styles.brandPill}>
-          <Ionicons name={isVideo ? 'videocam' : 'call'} size={13} color="#fff" />
-          <AppText style={styles.brandText}>HelloCat {isVideo ? 'video' : 'voice'} call</AppText>
-        </View>
+        {onCollapse ? (
+          <TouchableOpacity onPress={onCollapse} style={styles.collapseBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="chevron-down" size={24} color="#fff" />
+          </TouchableOpacity>
+        ) : <View style={styles.collapseBtn} />}
+        <AppText style={styles.brandText}>HelloCat {isVideo ? 'video' : 'voice'} call</AppText>
+        <View style={styles.collapseBtn} />
       </View>
       <View style={styles.incomingMid}>
-        <View style={styles.pulseWrap}>
-          <PulseRing delay={0} />
-          <PulseRing delay={730} />
-          <PulseRing delay={1460} />
-          <Image source={src} style={styles.incomingAvatar} />
-        </View>
+        <AvatarImg pic={pic} size={132} style={styles.incomingAvatar} />
         <AppText style={styles.incomingName} numberOfLines={2}>{name}</AppText>
-        <AppText style={styles.incomingSub}>Incoming {isVideo ? 'video' : 'voice'} call…</AppText>
+        <AppText style={styles.incomingSub}>Incoming {isVideo ? 'video' : 'voice'} call</AppText>
       </View>
       <View style={styles.incomingBottom}>
         <View style={styles.btnCol}>
-          <TouchableOpacity activeOpacity={0.8} style={[styles.bigBtn, { backgroundColor: '#ef4444' }]} onPress={() => callManager.rejectCall()}>
-            <Ionicons name="call" size={32} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+          <TouchableOpacity activeOpacity={0.8} style={[styles.bigBtn, { backgroundColor: '#e0141c' }]} onPress={() => callManager.rejectCall()}>
+            <Ionicons name="call" size={30} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
           </TouchableOpacity>
           <AppText style={styles.bigLabel}>Decline</AppText>
         </View>
         <View style={styles.btnCol}>
-          <Animated.View style={{ transform: [{ translateY: bounce }] }}>
-            <TouchableOpacity activeOpacity={0.8} style={[styles.bigBtn, { backgroundColor: '#22c55e' }]} onPress={() => callManager.acceptCall()}>
-              <Ionicons name={isVideo ? 'videocam' : 'call'} size={32} color="#fff" />
-            </TouchableOpacity>
-          </Animated.View>
+          <TouchableOpacity activeOpacity={0.8} style={[styles.bigBtn, { backgroundColor: '#5cc43c' }]} onPress={() => callManager.acceptCall()}>
+            <Ionicons name={isVideo ? 'videocam' : 'call'} size={30} color="#fff" />
+          </TouchableOpacity>
           <AppText style={styles.bigLabel}>Accept</AppText>
         </View>
       </View>
@@ -78,6 +86,9 @@ function IncomingCallScreen({ name, pic, isVideo }) {
 
 export default function CallModal() {
   const [callState, setCallState] = useState(callManager.getState());
+  const [expanded, setExpanded] = useState(false);
+  const incomingId = callState.activeCall && callState.activeCall.callId;
+  useEffect(() => { setExpanded(false); }, [incomingId]);
 
   useEffect(() => {
     return callManager.subscribe((state) => {
@@ -101,7 +112,11 @@ export default function CallModal() {
   const name = activeCall.friendName || activeCall.callerName || 'Friend';
   const pic = activeCall.friendPic || activeCall.callerPic;
 
-  if (isIncoming) return <View style={styles.overlay0}><IncomingCallScreen name={name} pic={pic} isVideo={isVideo} /></View>;
+  if (isIncoming) {
+    const bannerOn = getNotificationSettings().callBanner !== false;
+    if (bannerOn && !expanded) return <IncomingBanner name={name} pic={pic} isVideo={isVideo} onExpand={() => setExpanded(true)} />;
+    return <View style={styles.overlay0}><IncomingCallScreen name={name} pic={pic} isVideo={isVideo} onCollapse={bannerOn ? () => setExpanded(false) : null} /></View>;
+  }
 
   return (
     <View style={styles.overlay}>
@@ -274,21 +289,25 @@ export default function CallModal() {
 const { width } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
-  overlay0: { ...StyleSheet.absoluteFillObject, zIndex: 999999, backgroundColor: '#0b1220' },
-  incomingRoot: { flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 60 : 48, paddingBottom: 64 },
-  incomingShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,12,24,0.68)' },
-  incomingTop: { width: '100%', alignItems: 'center' },
-  brandPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.14)', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 16 },
-  brandText: { color: '#fff', fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
+  overlay0: { ...StyleSheet.absoluteFillObject, zIndex: 999999, backgroundColor: '#14171c' },
+  bannerHost: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 999999, paddingHorizontal: 10 },
+  banner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2f3032', borderRadius: 44, paddingVertical: 12, paddingLeft: 14, paddingRight: 16, elevation: 14, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
+  bannerBody: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  bannerTitle: { color: '#ffffff', fontSize: 18, fontWeight: '600' },
+  bannerSub: { color: '#a1a6ad', fontSize: 13, marginTop: 2 },
+  bannerBtn: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  incomingRoot: { flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingBottom: 64 },
+  incomingShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(12,14,18,0.78)' },
+  incomingTop: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18 },
+  collapseBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  brandText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600', letterSpacing: 0.3 },
   incomingMid: { alignItems: 'center', paddingHorizontal: 30 },
-  pulseWrap: { width: 150, height: 150, alignItems: 'center', justifyContent: 'center', marginBottom: 34 },
-  pulse: { position: 'absolute', width: 150, height: 150, borderRadius: 75, backgroundColor: '#22c55e' },
-  incomingAvatar: { width: 150, height: 150, borderRadius: 75, borderWidth: 3, borderColor: 'rgba(255,255,255,0.9)', backgroundColor: '#1e293b' },
-  incomingName: { color: '#fff', fontSize: 32, fontWeight: '700', textAlign: 'center' },
-  incomingSub: { color: 'rgba(255,255,255,0.75)', fontSize: 16, marginTop: 8 },
-  incomingBottom: { width: '100%', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', paddingHorizontal: 30 },
-  bigBtn: { width: 74, height: 74, borderRadius: 37, alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  bigLabel: { color: '#fff', fontSize: 14, fontWeight: '600', marginTop: 10 },
+  incomingAvatar: { marginBottom: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+  incomingName: { color: '#fff', fontSize: 30, fontWeight: '600', textAlign: 'center' },
+  incomingSub: { color: 'rgba(255,255,255,0.6)', fontSize: 15, marginTop: 8 },
+  incomingBottom: { width: '100%', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', paddingHorizontal: 40 },
+  bigBtn: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center' },
+  bigLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '500', marginTop: 10 },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#0f172a',
