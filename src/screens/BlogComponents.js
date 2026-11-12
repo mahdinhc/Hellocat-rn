@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, Image, TouchableOpacity, Linking, Text, Dimensions, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ref, set, remove, serverTimestamp } from 'firebase/database';
-import { db } from '../firebase';
+import { ref, get, set, remove, serverTimestamp } from 'firebase/database';
+import { db, auth } from '../firebase';
 import { safeRef, safeOnValue, safeUri, isValidKey } from '../safe';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
@@ -100,22 +100,52 @@ export function Attachments({ items }) {
   );
 }
 
+const countKeys = (o) => (o && typeof o === 'object' ? Object.keys(o).length : 0);
+
+function metaFromValue(val, uid) {
+  const v = val && typeof val === 'object' ? val : {};
+  return {
+    likes: countKeys(v.reacts),
+    comments: countKeys(v.comments),
+    views: Number(v.views) || 0,
+    mine: !!uid && !!v.reacts && typeof v.reacts === 'object' && v.reacts[uid] != null,
+  };
+}
+
+// REST fallback in case the websocket listener is blocked/fails on the device
+async function fetchBlogViaRest(id, uid) {
+  const user = auth.currentUser;
+  const token = user ? await user.getIdToken() : null;
+  const base = db.app.options.databaseURL;
+  const url = `${base}/blogs/${encodeURIComponent(id)}.json${token ? `?auth=${token}` : ''}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('REST ' + res.status);
+  return metaFromValue(await res.json(), uid);
+}
+
 export function useBlogMeta(id) {
-  const [meta, setMeta] = useState({ likes: 0, comments: 0, views: 0, mine: false });
+  const [meta, setMeta] = useState({ likes: 0, comments: 0, views: 0, mine: false, error: null });
   const { uid } = useAuth();
   useEffect(() => {
     if (!id) return undefined;
     const r = safeRef('blogs', id);
-    if (!r) return undefined;
-    return safeOnValue(r, (s) => {
-      const reacts = s.child('reacts');
-      setMeta({
-        likes: reacts.numChildren() || 0,
-        comments: s.child('comments').numChildren() || 0,
-        views: Number(s.child('views').val()) || 0,
-        mine: !!uid && reacts.child(uid).exists(),
-      });
-    });
+    if (!r) { setMeta((m) => ({ ...m, error: 'bad id: ' + String(id) })); return undefined; }
+    let alive = true;
+    let gotData = false;
+    const apply = (s) => {
+      if (!alive || !s) return;
+      gotData = true;
+      setMeta({ ...metaFromValue(s.val(), uid), error: null });
+    };
+    const viaRest = () => fetchBlogViaRest(id, uid)
+      .then((m) => { if (alive && !gotData) setMeta({ ...m, error: null }); })
+      .catch((e) => { console.warn('[useBlogMeta REST]', id, e && e.message); if (alive && !gotData) setMeta((m) => ({ ...m, error: String((e && e.message) || e) })); });
+    get(r).then(apply).catch((e) => { console.warn('[useBlogMeta get]', id, e && e.message); viaRest(); });
+    const unsub = safeOnValue(r, apply, (e) => { console.warn('[useBlogMeta listener]', id, e && e.message); viaRest(); });
+    return () => {
+      alive = false;
+      try { if (typeof unsub === 'function') unsub(); } catch (e) { /* ignore */ }
+    };
   }, [id, uid]);
   return meta;
 }
@@ -177,22 +207,23 @@ export function BlogCard({ post, navigation, showAuthor = true, detail = false }
         <TouchableOpacity onPress={onToggleLike} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 22, paddingVertical: 4 }}>
           <Ionicons name={isLiked ? 'heart' : 'heart-outline'} size={22} color={isLiked ? '#e5484d' : theme.cardText} />
           <AppText size={13} style={{ marginLeft: 6, color: isLiked ? '#e5484d' : theme.cardText, fontWeight: isLiked ? '600' : '400' }}>
-            {formatNumber(likeCount)}
+            {meta.error ? '?' : formatNumber(likeCount)}
           </AppText>
         </TouchableOpacity>
         <TouchableOpacity onPress={open} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 22, paddingVertical: 4 }}>
           <Ionicons name="chatbubble-outline" size={20} color={theme.cardText} />
           <AppText size={13} style={{ marginLeft: 6, color: theme.cardText }}>
-            {formatNumber(meta.comments || 0)}
+            {meta.error ? '?' : formatNumber(meta.comments || 0)}
           </AppText>
         </TouchableOpacity>
         <Row style={{ alignItems: 'center', paddingVertical: 4 }}>
           <Ionicons name="eye-outline" size={20} color={theme.cardText} style={{ opacity: 0.7 }} />
           <AppText size={13} muted style={{ marginLeft: 6 }}>
-            {formatNumber(meta.views || 0)}
+            {meta.error ? '?' : formatNumber(meta.views || 0)}
           </AppText>
         </Row>
       </Row>
+      {meta.error ? <AppText size={10} muted style={{ marginTop: 4 }}>counts error: {meta.error} (id: {String(post.id)})</AppText> : null}
     </Card>
   );
 }
