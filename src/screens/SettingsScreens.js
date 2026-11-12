@@ -105,7 +105,11 @@ export function SettingsProfileScreen({ navigation }) {
     try {
       const patch = { name: [first.trim(), last.trim()], bio: bio.trim() };
       if (photo) {
-        const url = await uploadLocalFile(`users/${uid}/profile.png`, photo.uri, photo.mimeType || 'image/png');
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const dtStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+        const ext = photo.mimeType === 'image/jpeg' ? 'jpg' : (photo.mimeType === 'image/webp' ? 'webp' : 'png');
+        const url = await uploadLocalFile(`users/${uid}/profile_${dtStr}.${ext}`, photo.uri, photo.mimeType || 'image/png');
         patch.profile_picture = url;
       }
       await update(ref(db, 'users/' + uid), patch);

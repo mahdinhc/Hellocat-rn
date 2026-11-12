@@ -23,6 +23,7 @@ import { renderHellocatString } from '../services/hellocatString';
 const PAGE = 40;
 
 
+
 const DEFAULT_REACTS = [
   { code: 'u2764', emoji: '❤️' },
   { code: 'u1f602', emoji: '😂' },
@@ -32,56 +33,48 @@ const DEFAULT_REACTS = [
   { code: 'u1f525', emoji: '🔥' },
 ];
 
-const PRESET_REACTION_SETS = [
+const EMOJI_PICKER_TABS = [
   {
-    name: 'Demon',
-    icon: '😈',
-    reacts: [
-      { code: 'u1f608', emoji: '😈' },
-      { code: 'u1f47f', emoji: '👿' },
-      { code: 'u1f480', emoji: '💀' },
-      { code: 'u2620', emoji: '☠️' },
-      { code: 'u1f525', emoji: '🔥' },
-      { code: 'u1f921', emoji: '🤡' },
-    ],
+    title: 'Popular',
+    icon: 'star-outline',
+    emojis: ['❤️', '😂', '😮', '😢', '👍', '🔥', '👏', '🙏', '😍', '🎉', '💔', '💯'],
   },
   {
-    name: 'Hellocat',
-    icon: '🐱',
-    reacts: [
-      { code: 'u1f63a', emoji: '😺' },
-      { code: 'u1f638', emoji: '😸' },
-      { code: 'u1f63b', emoji: '😻' },
-      { code: 'u1f63c', emoji: '😼' },
-      { code: 'u1f640', emoji: '🙀' },
-      { code: 'u1f63e', emoji: '😾' },
-    ],
+    title: 'Smileys',
+    icon: 'happy-outline',
+    emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓', '🧐'],
   },
   {
-    name: 'Love & Hearts',
-    icon: '💖',
-    reacts: [
-      { code: 'u2764', emoji: '❤️' },
-      { code: 'u1f496', emoji: '💖' },
-      { code: 'u1f49e', emoji: '💞' },
-      { code: 'u1f48b', emoji: '💋' },
-      { code: 'u1f970', emoji: '🥰' },
-      { code: 'u1f60d', emoji: '😍' },
-    ],
+    title: 'Demon & Dark',
+    icon: 'skull-outline',
+    emojis: ['😈', '👿', '💀', '☠️', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖', '🩸', '🗡️', '⚔️', '🖤', '🔥', '💣', '🦇', '🕷️', '🕸️', '🦂', '🧟'],
   },
   {
-    name: 'Fun & Cool',
-    icon: '😎',
-    reacts: [
-      { code: 'u1f60e', emoji: '😎' },
-      { code: 'u1f973', emoji: '🥳' },
-      { code: 'u1f911', emoji: '🤑' },
-      { code: 'u1f4af', emoji: '💯' },
-      { code: 'u2728', emoji: '✨' },
-      { code: 'u1f389', emoji: '🎉' },
-    ],
+    title: 'Cat',
+    icon: 'paw-outline',
+    emojis: ['😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '🐱', '🐈', '🐈‍⬛', '🐾'],
+  },
+  {
+    title: 'Gestures',
+    icon: 'hand-left-outline',
+    emojis: ['👍', '👎', '👊', '✊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✌️', '🤟', '🤘', '👌', '🤌', '🤏', '👈', '👉', '👆', '👇', '☝️', '✋', '🤚', '🖐️', '🖖', '👋', '🤙', '💪', '🖕'],
+  },
+  {
+    title: 'Hearts',
+    icon: 'heart-outline',
+    emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '💌', '💋', '🥰'],
   },
 ];
+
+function emojiToCode(emoji) {
+  try {
+    const cp = emoji.codePointAt(0);
+    return 'u' + cp.toString(16);
+  } catch (e) {
+    return emoji;
+  }
+}
+
 
 
 function codeToChar(code) {
@@ -240,6 +233,7 @@ export default function ChatScreen({ route, navigation }) {
   const [uploading, setUploading] = useState(false);
   const [activeReacts, setActiveReacts] = useState(DEFAULT_REACTS);
   const [customizerVisible, setCustomizerVisible] = useState(false);
+  const [pickerTab, setPickerTab] = useState(0);
   const typingTimer = useRef(null);
 
   useEffect(() => {
@@ -493,13 +487,31 @@ export default function ChatScreen({ route, navigation }) {
         </Row>
       </KeyboardAvoidingView>
 
-      {/* Message action & reaction overlay */}
+      {/* Message action & reaction overlay (Messenger / WhatsApp style floating pill) */}
       <Modal visible={!!selectedMessage} transparent animationType="fade" onRequestClose={closeMenu}>
-        <Pressable onPress={closeMenu} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '85%', maxWidth: 340, backgroundColor: theme.card || '#232323', borderRadius: 20, padding: 16, elevation: 10 }}>
-            {/* Quick reaction row */}
-            <Row style={{ justifyContent: 'space-between', alignItems: 'center', paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: theme.border || '#333', marginBottom: 10 }}>
-              {activeReacts.map((r) => {
+        <Pressable onPress={closeMenu} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 }}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 330, alignItems: 'center' }}>
+            
+            {/* WhatsApp / Messenger style Floating Reaction Bubble */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: theme.card || '#262628',
+                borderRadius: 30,
+                paddingHorizontal: 8,
+                paddingVertical: 6,
+                marginBottom: 12,
+                elevation: 12,
+                shadowColor: '#000',
+                shadowOpacity: 0.35,
+                shadowRadius: 10,
+                shadowOffset: { width: 0, height: 4 },
+                width: '100%',
+              }}
+            >
+              {activeReacts.slice(0, 5).map((r) => {
                 const isSelected = selectedMessage?.reacts && selectedMessage.reacts[uid]?.type === r.code;
                 return (
                   <TouchableOpacity
@@ -510,139 +522,135 @@ export default function ChatScreen({ route, navigation }) {
                       closeMenu();
                     }}
                     style={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: 19,
-                      backgroundColor: isSelected ? (theme.link + '33') : (theme.bg || '#1a1a1a'),
-                      borderWidth: isSelected ? 2 : 1,
-                      borderColor: isSelected ? theme.link : (theme.border || '#444'),
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: isSelected ? (theme.link + '33') : 'transparent',
                       justifyContent: 'center',
                       alignItems: 'center',
                     }}
                   >
-                    <AppText size={20}>{r.emoji}</AppText>
+                    <AppText size={24}>{r.emoji}</AppText>
                   </TouchableOpacity>
                 );
               })}
-              {/* Customize Reactions '+' button */}
+              {/* '+' button to open WhatsApp style emoji sheet */}
               <TouchableOpacity
                 activeOpacity={0.6}
                 onPress={() => {
                   setCustomizerVisible(true);
                 }}
                 style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
-                  backgroundColor: theme.bg || '#1a1a1a',
-                  borderWidth: 1,
-                  borderColor: theme.link,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: theme.dark ? '#333' : '#e5e7eb',
                   justifyContent: 'center',
                   alignItems: 'center',
+                  marginLeft: 4,
                 }}
               >
-                <Ionicons name="add" size={22} color={theme.link} />
+                <Ionicons name="add" size={22} color={theme.text} />
               </TouchableOpacity>
-            </Row>
+            </View>
 
-            {/* Actions list */}
-            {(selectedMessage?.data || selectedMessage?.filename) ? (
-              <TouchableOpacity onPress={copySelectedText} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
-                <Ionicons name="copy-outline" size={20} color={theme.text} style={{ marginRight: 12 }} />
-                <AppText size={15} style={{ color: theme.text }}>Copy Text</AppText>
+            {/* Context menu actions */}
+            <View style={{ width: '100%', backgroundColor: theme.card || '#262628', borderRadius: 16, paddingVertical: 6, paddingHorizontal: 16, elevation: 8 }}>
+              {(selectedMessage?.data || selectedMessage?.filename) ? (
+                <TouchableOpacity onPress={copySelectedText} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
+                  <Ionicons name="copy-outline" size={20} color={theme.text} style={{ marginRight: 14 }} />
+                  <AppText size={15} style={{ color: theme.text }}>Copy</AppText>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity onPress={replySelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
+                <Ionicons name="arrow-undo-outline" size={20} color={theme.link} style={{ marginRight: 14 }} />
+                <AppText size={15} style={{ color: theme.link }}>Reply</AppText>
               </TouchableOpacity>
-            ) : null}
 
-            <TouchableOpacity onPress={replySelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
-              <Ionicons name="arrow-undo-outline" size={20} color={theme.link} style={{ marginRight: 12 }} />
-              <AppText size={15} style={{ color: theme.link }}>Reply</AppText>
-            </TouchableOpacity>
+              {selectedMessage?.send_from === uid && !selectedMessage?.removed ? (
+                <TouchableOpacity onPress={deleteSelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
+                  <Ionicons name="trash-outline" size={20} color="#ff6c61" style={{ marginRight: 14 }} />
+                  <AppText size={15} style={{ color: "#ff6c61" }}>Delete</AppText>
+                </TouchableOpacity>
+              ) : null}
 
-            {selectedMessage?.send_from === uid && !selectedMessage?.removed ? (
-              <TouchableOpacity onPress={deleteSelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
-                <Ionicons name="trash-outline" size={20} color="#ff6c61" style={{ marginRight: 12 }} />
-                <AppText size={15} style={{ color: "#ff6c61" }}>Delete Message</AppText>
+              <TouchableOpacity onPress={closeMenu} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderTopColor: theme.border || '#38383a' }}>
+                <Ionicons name="close-circle-outline" size={20} color={theme.textMuted || '#888'} style={{ marginRight: 14 }} />
+                <AppText size={15} muted>Close</AppText>
               </TouchableOpacity>
-            ) : null}
-
-            <TouchableOpacity onPress={closeMenu} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, marginTop: 4, borderTopWidth: 1, borderTopColor: theme.border || '#333' }}>
-              <Ionicons name="close-circle-outline" size={20} color={theme.textMuted || '#888'} style={{ marginRight: 12 }} />
-              <AppText size={15} muted>Close</AppText>
-            </TouchableOpacity>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
 
-      {/* Reaction Set Customizer Modal */}
-      <Modal visible={customizerVisible} transparent animationType="fade" onRequestClose={() => setCustomizerVisible(false)}>
-        <Pressable onPress={() => setCustomizerVisible(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '90%', maxWidth: 360, backgroundColor: theme.card || '#232323', borderRadius: 20, padding: 18, elevation: 12 }}>
-            <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <AppText bold size={17}>Customize Reactions</AppText>
-              <TouchableOpacity onPress={() => setCustomizerVisible(false)}>
+      {/* WhatsApp / Messenger Full Emoji Picker & Customizer Sheet */}
+      <Modal visible={customizerVisible} transparent animationType="slide" onRequestClose={() => setCustomizerVisible(false)}>
+        <Pressable onPress={() => setCustomizerVisible(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', height: '62%', backgroundColor: theme.card || '#1f1f23', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 12, elevation: 20 }}>
+            {/* Grab handle */}
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#666', alignSelf: 'center', marginBottom: 12 }} />
+
+            {/* Header with Title and Close */}
+            <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <AppText bold size={17}>React to Message</AppText>
+              <TouchableOpacity onPress={() => setCustomizerVisible(false)} style={{ padding: 4 }}>
                 <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
             </Row>
-            <AppText size={13} muted style={{ marginBottom: 14 }}>Select a reaction pack for your quick reaction bar:</AppText>
 
-            {/* Default / Classic Pack */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => selectReactionSet({ name: 'Default', reacts: DEFAULT_REACTS })}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingVertical: 10,
-                paddingHorizontal: 12,
-                borderRadius: 12,
-                backgroundColor: theme.bg || '#1a1a1a',
-                marginBottom: 10,
-                borderWidth: 1,
-                borderColor: theme.border || '#333',
-              }}
-            >
-              <Row style={{ alignItems: 'center' }}>
-                <AppText size={20} style={{ marginRight: 8 }}>❤️</AppText>
-                <AppText bold size={14}>Classic HelloCat</AppText>
-              </Row>
-              <Row style={{ gap: 4 }}>
-                {DEFAULT_REACTS.slice(0, 4).map((r) => (
-                  <AppText key={r.code} size={15}>{r.emoji}</AppText>
-                ))}
-              </Row>
-            </TouchableOpacity>
+            {/* Category Tabs (WhatsApp / Messenger Style) */}
+            <Row style={{ borderBottomWidth: 1, borderBottomColor: theme.border || '#333', paddingBottom: 8, marginBottom: 12, justifyContent: 'space-around' }}>
+              {EMOJI_PICKER_TABS.map((tab, idx) => (
+                <TouchableOpacity
+                  key={tab.title}
+                  onPress={() => setPickerTab(idx)}
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 16,
+                    backgroundColor: pickerTab === idx ? (theme.link + '26') : 'transparent',
+                  }}
+                >
+                  <Ionicons name={tab.icon} size={20} color={pickerTab === idx ? theme.link : (theme.textMuted || '#888')} />
+                </TouchableOpacity>
+              ))}
+            </Row>
 
-            {/* Preset reaction packs: Demon, Hellocat, Love, Fun */}
-            {PRESET_REACTION_SETS.map((p) => (
-              <TouchableOpacity
-                key={p.name}
-                activeOpacity={0.7}
-                onPress={() => selectReactionSet(p)}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
-                  borderRadius: 12,
-                  backgroundColor: theme.bg || '#1a1a1a',
-                  marginBottom: 10,
-                  borderWidth: 1,
-                  borderColor: theme.border || '#333',
-                }}
-              >
-                <Row style={{ alignItems: 'center' }}>
-                  <AppText size={20} style={{ marginRight: 8 }}>{p.icon}</AppText>
-                  <AppText bold size={14}>{p.name}</AppText>
-                </Row>
-                <Row style={{ gap: 4 }}>
-                  {p.reacts.slice(0, 4).map((r) => (
-                    <AppText key={r.code} size={15}>{r.emoji}</AppText>
-                  ))}
-                </Row>
-              </TouchableOpacity>
-            ))}
+            {/* Emoji Grid */}
+            <FlatList
+              data={EMOJI_PICKER_TABS[pickerTab]?.emojis || []}
+              keyExtractor={(em, i) => em + i}
+              numColumns={6}
+              contentContainerStyle={{ paddingBottom: 24 }}
+              renderItem={({ item: emoji }) => (
+                <TouchableOpacity
+                  activeOpacity={0.6}
+                  onPress={() => {
+                    const code = emojiToCode(emoji);
+                    toggleReact(selectedMessage, code);
+                    // Also update activeReacts so user's favorites bar gets this emoji
+                    setActiveReacts((prev) => {
+                      const filtered = prev.filter((p) => p.code !== code);
+                      const updated = [{ code, emoji }, ...filtered].slice(0, 5);
+                      AsyncStorage.setItem('@hellocat_custom_reactions', JSON.stringify(updated)).catch(() => {});
+                      return updated;
+                    });
+                    setCustomizerVisible(false);
+                    closeMenu();
+                  }}
+                  style={{
+                    flex: 1 / 6,
+                    aspectRatio: 1,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    marginVertical: 4,
+                  }}
+                >
+                  <AppText size={28}>{emoji}</AppText>
+                </TouchableOpacity>
+              )}
+            />
           </Pressable>
         </Pressable>
       </Modal>
