@@ -115,7 +115,11 @@ export default function ProfileScreen({ route, navigation }) {
       try {
         navigation.setOptions({
           headerRight: () => (
-            <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Settings')}
+              style={{ padding: 8, marginRight: 4, justifyContent: 'center', alignItems: 'center' }}
+            >
               <Ionicons name="settings-outline" size={24} color={theme.primaryText} />
             </TouchableOpacity>
           ),

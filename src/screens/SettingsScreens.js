@@ -494,8 +494,8 @@ export function SettingsDeveloperScreen() {
                     <Ionicons name={isPlay ? 'pause-circle' : 'play-circle'} size={42} color={theme.link} />
                   </TouchableOpacity>
                   <View style={{ marginLeft: 12, flex: 1 }}>
-                    <AppText size={14} numberOfLines={1}>Call · {fmtWhen(rec.when)}</AppText>
-                    <AppText size={11} muted>{fmtSize(rec.size)} · {rec.name.split('.').pop().toUpperCase()}{active && playing.dur ? ` · ${fmtDur(playing.pos)} / ${fmtDur(playing.dur)}` : ''}</AppText>
+                    <AppText size={14} numberOfLines={1}>{rec.folder ? rec.folder : 'Call'} · {fmtWhen(rec.when)}</AppText>
+                    <AppText size={11} muted>{rec.folder ? `/${rec.folder}/ · ` : ''}{fmtSize(rec.size)} · {rec.name.split('.').pop().toUpperCase()}{active && playing.dur ? ` · ${fmtDur(playing.pos)} / ${fmtDur(playing.dur)}` : ''}</AppText>
                   </View>
                   <TouchableOpacity onPress={() => shareRec(rec)} style={{ padding: 8 }}>
                     <Ionicons name="share-outline" size={20} color={theme.text} style={{ opacity: 0.7 }} />

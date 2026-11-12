@@ -60,6 +60,10 @@ class MobileCallManager {
     this.isSpeakerOn = false;
     this.isFrontCamera = true;
     this.isReconnecting = false;
+    this.isRestartingIce = false;
+    this._lastReconnectOfferTs = 0;
+    this._lastReconnectAnswerTs = 0;
+    this._lastReconnectReqTs = 0;
     this.disconnectTimer = null;
 
     // Listeners for UI state updates
@@ -387,17 +391,21 @@ class MobileCallManager {
           this.isReconnecting = false;
           this.notifySubscribers();
         } else if (st === 'disconnected') {
-          // Temporary network drop / NAT migration - give up to 10 seconds to auto-reconnect ICE
-          this.isReconnecting = true;
-          this.notifySubscribers();
+          if (!this.isReconnecting) {
+            this.isReconnecting = true;
+            this.notifySubscribers();
+            this.handleReconnection();
+          }
           if (!this.disconnectTimer) {
             this.disconnectTimer = setTimeout(() => {
               if (this.activeCall && this.activeCall.status === 'connected') {
                 this.cleanup();
               }
-            }, 10000);
+            }, 15000);
           }
-        } else if (st === 'failed' || st === 'closed') {
+        } else if (st === 'failed') {
+          this.handleReconnection();
+        } else if (st === 'closed') {
           if (this.activeCall && this.activeCall.status === 'connected') {
             this.cleanup();
           }
@@ -509,17 +517,21 @@ class MobileCallManager {
           this.isReconnecting = false;
           this.notifySubscribers();
         } else if (st === 'disconnected') {
-          // Temporary network drop / NAT migration - give up to 10 seconds to auto-reconnect ICE
-          this.isReconnecting = true;
-          this.notifySubscribers();
+          if (!this.isReconnecting) {
+            this.isReconnecting = true;
+            this.notifySubscribers();
+            this.handleReconnection();
+          }
           if (!this.disconnectTimer) {
             this.disconnectTimer = setTimeout(() => {
               if (this.activeCall && this.activeCall.status === 'connected') {
                 this.cleanup();
               }
-            }, 10000);
+            }, 15000);
           }
-        } else if (st === 'failed' || st === 'closed') {
+        } else if (st === 'failed') {
+          this.handleReconnection();
+        } else if (st === 'closed') {
           if (this.activeCall && this.activeCall.status === 'connected') {
             this.cleanup();
           }
@@ -558,7 +570,8 @@ class MobileCallManager {
       this.startTimer();
       this.listenToCallSession(callKey);
       this.notifySubscribers();
-      callRecorder.startRecording(callKey).catch(() => {});
+      const calleePartnerName = this.activeCall?.callerName || this.activeCall?.fid;
+      callRecorder.startRecording(callKey, calleePartnerName).catch(() => {});
     } catch (e) {
       console.warn('Error accepting call:', e);
       this.cleanup();
@@ -625,6 +638,49 @@ class MobileCallManager {
         });
       }
 
+
+      // Handle ICE renegotiation / reconnect offer (Callee receives reconnectOffer)
+      if (!this.activeCall?.isCaller && call.reconnectOffer && this.peerConnection) {
+        if (!this._lastReconnectOfferTs || this._lastReconnectOfferTs < (call.reconnectOffer.ts || 0)) {
+          this._lastReconnectOfferTs = call.reconnectOffer.ts || Date.now();
+          (async () => {
+            try {
+              nativeCall.playFeedbackTone('reconnect');
+              await this.peerConnection.setRemoteDescription(new RTCSessionDescription(call.reconnectOffer));
+              const answer = await this.peerConnection.createAnswer();
+              await this.peerConnection.setLocalDescription(answer);
+              await update(ref(db, `calls/${callKey}`), {
+                reconnectAnswer: { type: answer.type, sdp: answer.sdp, ts: Date.now() },
+              });
+            } catch (e) {
+              console.warn('Failed answering reconnectOffer:', e);
+            }
+          })();
+        }
+      }
+
+      // Caller receives reconnectAnswer
+      if (this.activeCall?.isCaller && call.reconnectAnswer && this.peerConnection) {
+        if (!this._lastReconnectAnswerTs || this._lastReconnectAnswerTs < (call.reconnectAnswer.ts || 0)) {
+          this._lastReconnectAnswerTs = call.reconnectAnswer.ts || Date.now();
+          (async () => {
+            try {
+              await this.peerConnection.setRemoteDescription(new RTCSessionDescription(call.reconnectAnswer));
+            } catch (e) {
+              console.warn('Failed applying reconnectAnswer:', e);
+            }
+          })();
+        }
+      }
+
+      // Caller notified that callee requested reconnection
+      if (this.activeCall?.isCaller && call.reconnectRequested && this.peerConnection) {
+        if (!this._lastReconnectReqTs || this._lastReconnectReqTs < call.reconnectRequested) {
+          this._lastReconnectReqTs = call.reconnectRequested;
+          this.handleReconnection();
+        }
+      }
+
       if (call.status === 'connected') {
         if (this.ringTimeout) {
           clearTimeout(this.ringTimeout);
@@ -634,7 +690,8 @@ class MobileCallManager {
         if (this.activeCall) this.activeCall.status = 'connected';
         this.startTimer();
         this.notifySubscribers();
-        callRecorder.startRecording(callKey).catch(() => {});
+        const partnerName = this.activeCall?.isCaller ? (this.activeCall?.friendName || this.activeCall?.fid) : (this.activeCall?.callerName || this.activeCall?.fid);
+        callRecorder.startRecording(callKey, partnerName).catch(() => {});
       } else if (call.status === 'ringing') {
         if (this.activeCall && this.activeCall.isCaller && this.activeCall.status !== 'ringing') {
           this.activeCall.status = 'ringing';
@@ -745,6 +802,38 @@ class MobileCallManager {
     }
   }
 
+
+  async handleReconnection() {
+    if (!this.peerConnection || !this.activeCall || this.isRestartingIce) return;
+    this.isRestartingIce = true;
+    try {
+      nativeCall.playFeedbackTone('reconnect');
+      const callKey = this.activeCall.callId;
+      if (!callKey) return;
+
+      if (this.activeCall.isCaller) {
+        // Restart ICE on caller side
+        if (typeof this.peerConnection.restartIce === 'function') {
+          try { this.peerConnection.restartIce(); } catch (e) {}
+        }
+        const offer = await this.peerConnection.createOffer({ iceRestart: true });
+        await this.peerConnection.setLocalDescription(offer);
+        await update(ref(db, `calls/${callKey}`), {
+          reconnectOffer: { type: offer.type, sdp: offer.sdp, ts: Date.now() },
+        });
+      } else {
+        // If callee gets disconnected, notify caller to restart ICE if needed
+        await update(ref(db, `calls/${callKey}`), {
+          reconnectRequested: Date.now(),
+        });
+      }
+    } catch (e) {
+      console.warn('ICE restart error:', e);
+    } finally {
+      setTimeout(() => { this.isRestartingIce = false; }, 3000);
+    }
+  }
+
   cleanupStateOnly() {
     this.stopTimer();
     callRecorder.stopRecording().catch(() => {});
@@ -779,6 +868,7 @@ class MobileCallManager {
   }
 
   cleanup() {
+    nativeCall.playFeedbackTone('disconnect');
     callRecorder.stopRecording().catch(() => {});
     const duration = this.callDurationSec || 0;
     const savedCall = this.activeCall ? { ...this.activeCall } : null;

@@ -211,29 +211,32 @@ object CallRecEngine {
     private fun mimeFor(name: String) = if (name.endsWith(".m4a")) "audio/mp4" else "audio/x-wav"
 
     // Copies a recording into /Hellocat/Racordig (needs All-files access on Android 11+).
-    // Without that permission it falls back to Documents/Hellocat/Racordig, the closest place Android allows.
-    fun publish(ctx: Context, f: File): String? {
+    // Supports relative folder subdirectories (e.g. "John Doe")
+    fun publish(ctx: Context, f: File, subFolder: String = ""): String? {
         try {
+            val safeSub = subFolder.trim().replace(Regex("[^a-zA-Z0-9._ -]"), "_").trim('/')
             if (canWriteDirect(ctx)) {
-                val dir = publicDir()
-                dir.mkdirs()
-                val dest = File(dir, f.name)
+                val base = publicDir()
+                val targetDir = if (safeSub.isNotEmpty()) File(base, safeSub) else base
+                targetDir.mkdirs()
+                val dest = File(targetDir, f.name)
                 f.copyTo(dest, true)
                 MediaScannerConnection.scanFile(ctx, arrayOf(dest.absolutePath), null, null)
                 return dest.absolutePath
             }
             if (Build.VERSION.SDK_INT >= 29) {
+                val relPath = if (safeSub.isNotEmpty()) "Documents/Hellocat/Racordig/$safeSub" else "Documents/Hellocat/Racordig"
                 val v = ContentValues()
                 v.put(MediaStore.MediaColumns.DISPLAY_NAME, f.name)
                 v.put(MediaStore.MediaColumns.MIME_TYPE, mimeFor(f.name))
-                v.put(MediaStore.MediaColumns.RELATIVE_PATH, "Documents/Hellocat/Racordig")
+                v.put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
                 v.put(MediaStore.MediaColumns.IS_PENDING, 1)
                 val uri = ctx.contentResolver.insert(MediaStore.Files.getContentUri("external"), v) ?: return null
                 ctx.contentResolver.openOutputStream(uri)?.use { o -> f.inputStream().use { it.copyTo(o) } }
                 val v2 = ContentValues()
                 v2.put(MediaStore.MediaColumns.IS_PENDING, 0)
                 ctx.contentResolver.update(uri, v2, null, null)
-                return "Documents/Hellocat/Racordig/" + f.name
+                return "$relPath/${f.name}"
             }
         } catch (t: Throwable) {
             Log.w(TAG, "could not publish recording: " + t)
@@ -246,6 +249,12 @@ object CallRecEngine {
             if (canWriteDirect(ctx)) {
                 val d = File(publicDir(), name)
                 if (d.exists()) d.delete()
+                val allFiles = publicDir().walkTopDown().maxDepth(3)
+                for (file in allFiles) {
+                    if (file.name == name) {
+                        file.delete()
+                    }
+                }
             }
         } catch (t: Throwable) {}
         try {
@@ -269,6 +278,27 @@ import android.provider.Settings
 import android.util.Log
 
 // Plays the incoming-call ringtone on the RING stream (ring volume / silent mode), like a real phone call.
+object TonePlayer {
+    fun playTone(toneType: String) {
+        Thread {
+            try {
+                val tone = if (toneType == "disconnect") android.media.ToneGenerator.TONE_PROP_PROMPT else android.media.ToneGenerator.TONE_PROP_BEEP2
+                val tg = android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 90)
+                tg.startTone(tone, if (toneType == "disconnect") 450 else 250)
+                Thread.sleep(if (toneType == "disconnect") 500 else 300)
+                tg.release()
+            } catch (t: Throwable) {
+                try {
+                    val tg = android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 85)
+                    tg.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 300)
+                    Thread.sleep(350)
+                    tg.release()
+                } catch (e: Throwable) {}
+            }
+        }.start()
+    }
+}
+
 object RingtonePlayer {
     private var mp: MediaPlayer? = null
     private var focusReq: AudioFocusRequest? = null
@@ -720,6 +750,11 @@ class CallRecorderModule(ctx: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
+    fun playFeedbackTone(toneType: String) {
+        TonePlayer.playTone(toneType)
+    }
+
+    @ReactMethod
     fun stopRingtone(p: Promise) {
         RingtonePlayer.stop(reactApplicationContext)
         p.resolve(true)
@@ -752,9 +787,9 @@ class CallRecorderModule(ctx: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
-    fun publishFile(path: String, p: Promise) {
+    fun publishFile(path: String, subFolder: String, p: Promise) {
         Thread {
-            try { p.resolve(CallRecEngine.publish(reactApplicationContext, File(path.removePrefix("file://")))) } catch (t: Throwable) { p.resolve(null) }
+            try { p.resolve(CallRecEngine.publish(reactApplicationContext, File(path.removePrefix("file://")), subFolder)) } catch (t: Throwable) { p.resolve(null) }
         }.start()
     }
 
