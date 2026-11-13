@@ -774,7 +774,7 @@ export default function ChatScreen({ route, navigation }) {
               {/* Doodle trigger */}
               <TouchableOpacity onPress={startDoodleForSelected} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}>
                 <Ionicons name="brush-outline" size={20} color="#f59e0b" style={{ marginRight: 14 }} />
-                <AppText size={15} style={{ color: '#f59e0b' }}>Doodle on Message</AppText>
+                <AppText size={15} style={{ color: '#f59e0b' }}>Doodle</AppText>
               </TouchableOpacity>
 
               {/* Delete doodle if present */}
