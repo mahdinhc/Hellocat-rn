@@ -13,8 +13,9 @@ import {
   Pressable,
   Animated,
   PanResponder,
+  Keyboard,
 } from 'react-native';
-import Svg, { Path as SvgPath } from 'react-native-svg';
+import DoodleEditor, { DoodleView } from '../components/DoodleEditor';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -48,6 +49,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { renderHellocatString } from '../services/hellocatString';
 
 const PAGE = 40;
+
+// Lets a message's doodle draw over neighbouring messages (like the web version)
+function DoodleCell({ children, style, item, index, cellKey, ...props }) {
+  return (
+    <View {...props} style={[style, item && item.doodle ? { zIndex: 5, elevation: 5 } : null]}>
+      {children}
+    </View>
+  );
+}
 
 
 
@@ -116,8 +126,26 @@ function codeToChar(code) {
   return code;
 }
 
-function Bubble({ m, mine, replied, onLongPress, onToggleReact, onReply, currentUid, theme }) {
+function Bubble({ m, mine, replied, onLongPress, onToggleReact, onReply, currentUid, theme, hideDoodle }) {
   const panX = useRef(new Animated.Value(0)).current;
+  const wrapRef = useRef(null);
+  const measureSelf = useCallback(
+    () =>
+      new Promise((resolve) => {
+        let done = false;
+        const t = setTimeout(() => { if (!done) { done = true; resolve(null); } }, 400);
+        try {
+          if (wrapRef.current && wrapRef.current.measureInWindow) {
+            wrapRef.current.measureInWindow((x, y, w, h) => {
+              if (done) return;
+              done = true; clearTimeout(t);
+              resolve({ x, y, w, h });
+            });
+          } else { done = true; clearTimeout(t); resolve(null); }
+        } catch (e) { done = true; clearTimeout(t); resolve(null); }
+      }),
+    []
+  );
 
   const panResponder = useMemo(
     () =>
@@ -243,17 +271,16 @@ function Bubble({ m, mine, replied, onLongPress, onToggleReact, onReply, current
           alignItems: mine ? 'flex-end' : 'flex-start',
         }}
       >
+        <View ref={wrapRef} collapsable={false} style={{ maxWidth: '82%', position: 'relative' }}>
         <TouchableOpacity
           activeOpacity={0.85}
-          onLongPress={() => onLongPress(m)}
+          onLongPress={() => onLongPress(m, measureSelf)}
           style={{
-            maxWidth: '82%',
             backgroundColor: bg,
             borderRadius: 16,
             paddingHorizontal: 12,
             paddingVertical: 8,
             position: 'relative',
-            overflow: 'hidden',
           }}
         >
           {replied ? (
@@ -263,27 +290,6 @@ function Bubble({ m, mine, replied, onLongPress, onToggleReact, onReply, current
           ) : null}
           {body}
 
-          {/* Message Doodle overlay if present */}
-          {m.doodle && m.doodle.url ? (
-            <View
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 10,
-              }}
-            >
-              <Image
-                source={{ uri: m.doodle.url }}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode="contain"
-              />
-            </View>
-          ) : null}
-
           <Row style={{ justifyContent: 'flex-end', marginTop: 3 }}>
             {m.doodle && m.doodle.url ? (
               <Ionicons name="brush-outline" size={11} color={fg} style={{ opacity: 0.8, marginRight: 4 }} />
@@ -292,6 +298,8 @@ function Bubble({ m, mine, replied, onLongPress, onToggleReact, onReply, current
             {mine && !m.removed ? <Ionicons name={m.isSeenByReceiver ? 'checkmark-done' : 'checkmark'} size={13} color={fg} style={{ opacity: 0.7, marginLeft: 4 }} /> : null}
           </Row>
         </TouchableOpacity>
+        {m.doodle && m.doodle.url && !hideDoodle ? <DoodleView doodle={m.doodle} /> : null}
+        </View>
         {aggregatedReacts.length > 0 ? (
           <Row style={{ flexWrap: 'wrap', marginTop: -6, marginBottom: 4, zIndex: 2, alignSelf: mine ? 'flex-end' : 'flex-start', marginHorizontal: 6 }}>
             {aggregatedReacts.map((r) => (
@@ -525,8 +533,10 @@ export default function ChatScreen({ route, navigation }) {
     }
   }, [cid, uid]);
 
-  const onLongPress = useCallback((m) => {
+  const selectedMeasureRef = useRef(null);
+  const onLongPress = useCallback((m, measure) => {
     if (m.removed) return;
+    selectedMeasureRef.current = measure || null;
     setSelectedMessage(m);
   }, []);
 
@@ -553,21 +563,20 @@ export default function ChatScreen({ route, navigation }) {
     closeMenu();
   };
 
-  // Doodle state
-  const [doodleModalVisible, setDoodleModalVisible] = useState(false);
-  const [doodleTargetMessage, setDoodleTargetMessage] = useState(null);
-  const [doodlePaths, setDoodlePaths] = useState([]);
-  const [currentDoodlePath, setCurrentDoodlePath] = useState(null);
-  const [doodleColor, setDoodleColor] = useState('#ff4444');
-  const [doodleStrokeWidth, setDoodleStrokeWidth] = useState(4);
+  // Doodle state (full-screen overlay editor, like the web version)
+  const [doodleEditor, setDoodleEditor] = useState(null); // { message, rect }
 
-  const startDoodleForSelected = () => {
+  const startDoodleForSelected = async () => {
     if (!selectedMessage) return;
-    setDoodleTargetMessage(selectedMessage);
-    setDoodlePaths([]);
-    setCurrentDoodlePath(null);
+    const message = selectedMessage;
+    const measure = selectedMeasureRef.current;
     closeMenu();
-    setDoodleModalVisible(true);
+    Keyboard.dismiss();
+    // let the menu close / keyboard hide, then measure where the message really is
+    await new Promise((r) => setTimeout(r, 350));
+    let rect = null;
+    try { rect = measure ? await measure() : null; } catch (e) { rect = null; }
+    setDoodleEditor({ message, rect });
   };
 
   const removeDoodleForSelected = () => {
@@ -578,28 +587,32 @@ export default function ChatScreen({ route, navigation }) {
     closeMenu();
   };
 
-  const handleDoodleSave = async () => {
-    if (!doodleTargetMessage || !cid) return;
-    if (doodlePaths.length === 0) {
-      setDoodleModalVisible(false);
-      return;
-    }
+  const handleDoodleApply = async ({ url, pos }) => {
+    const target = doodleEditor && doodleEditor.message;
+    if (!target || !cid) { setDoodleEditor(null); return; }
     try {
-      // Build pure SVG string
-      const pathElements = doodlePaths.map((p) => {
-        if (!p.points || p.points.length < 2) return '';
-        const d = 'M ' + p.points.map((pt) => pt.x.toFixed(1) + ' ' + pt.y.toFixed(1)).join(' L ');
-        return `<path d="${d}" stroke="${p.color}" stroke-width="${p.width}" fill="none" stroke-linecap="round" stroke-linejoin="round" />`;
-      }).join('');
-      const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="240" viewBox="0 0 300 240">${pathElements}</svg>`;
-      const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgContent)}`;
-
-      await saveMessageDoodle(cid, doodleTargetMessage.key, dataUrl, { top: 0, left: 0, width: 300, height: 240 });
-      setDoodleModalVisible(false);
-      setDoodleTargetMessage(null);
+      await saveMessageDoodle(cid, target.key, url, pos);
+      setDoodleEditor(null);
     } catch (e) {
       Alert.alert('Error', (e && e.message) || 'Failed to save doodle');
     }
+  };
+
+  const handleDoodleDelete = () => {
+    const target = doodleEditor && doodleEditor.message;
+    if (!target || !cid) { setDoodleEditor(null); return; }
+    Alert.alert('Delete doodle', 'Are you sure you want to delete this doodle?', [
+      { text: 'No', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          deleteMessageDoodle(cid, target.key)
+            .then(() => setDoodleEditor(null))
+            .catch((e) => Alert.alert('Error', (e && e.message) || 'Could not remove doodle'));
+        },
+      },
+    ]);
   };
 
   // Direct paste image / GIF support
@@ -635,6 +648,7 @@ export default function ChatScreen({ route, navigation }) {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
         <FlatList
           inverted
+          CellRendererComponent={DoodleCell}
           data={data}
           keyExtractor={(m) => m.key}
           contentContainerStyle={{ paddingVertical: 8 }}
@@ -649,6 +663,7 @@ export default function ChatScreen({ route, navigation }) {
                 onReply={(msg) => setReplyTo(msg)}
                 currentUid={uid}
                 theme={theme}
+                hideDoodle={!!(doodleEditor && doodleEditor.message && doodleEditor.message.key === item.key)}
               />
             </ErrorBoundary>
           )}
@@ -857,153 +872,15 @@ export default function ChatScreen({ route, navigation }) {
         </Pressable>
       </Modal>
 
-      {/* Message Doodle Canvas Modal */}
-      <Modal visible={doodleModalVisible} transparent animationType="slide" onRequestClose={() => setDoodleModalVisible(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
-          <View style={{ width: '100%', maxWidth: 360, backgroundColor: theme.card || '#1f1f23', borderRadius: 20, overflow: 'hidden', elevation: 16 }}>
-            {/* Doodle Header */}
-            <Row style={{ paddingHorizontal: 16, paddingVertical: 12, justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: theme.border || '#333' }}>
-              <AppText bold size={16}>Doodle on Message</AppText>
-              <TouchableOpacity onPress={() => setDoodleModalVisible(false)} style={{ padding: 4 }}>
-                <Ionicons name="close" size={24} color={theme.text} />
-              </TouchableOpacity>
-            </Row>
-
-            {/* Colors & Brush Size Selector */}
-            <Row style={{ paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.dark ? '#18181b' : '#f4f4f5' }}>
-              <Row style={{ gap: 8 }}>
-                {['#ff4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ffffff'].map((c) => (
-                  <TouchableOpacity
-                    key={c}
-                    onPress={() => setDoodleColor(c)}
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: 13,
-                      backgroundColor: c,
-                      borderWidth: doodleColor === c ? 3 : 1,
-                      borderColor: doodleColor === c ? '#fff' : '#666',
-                    }}
-                  />
-                ))}
-              </Row>
-              <Row style={{ gap: 6 }}>
-                {[3, 6, 12].map((s) => (
-                  <TouchableOpacity
-                    key={s}
-                    onPress={() => setDoodleStrokeWidth(s)}
-                    style={{
-                      paddingHorizontal: 8,
-                      paddingVertical: 4,
-                      borderRadius: 12,
-                      backgroundColor: doodleStrokeWidth === s ? theme.link : 'transparent',
-                    }}
-                  >
-                    <AppText size={12} style={{ color: doodleStrokeWidth === s ? '#fff' : theme.text }}>
-                      {s}px
-                    </AppText>
-                  </TouchableOpacity>
-                ))}
-              </Row>
-            </Row>
-
-            {/* Interactive Drawing Pad */}
-            <View
-              style={{
-                width: '100%',
-                height: 240,
-                backgroundColor: theme.dark ? '#111' : '#f9f9f9',
-                position: 'relative',
-              }}
-              onStartShouldSetResponder={() => true}
-              onMoveShouldSetResponder={() => true}
-              onResponderGrant={(evt) => {
-                const { locationX, locationY } = evt.nativeEvent;
-                const newPath = {
-                  color: doodleColor,
-                  width: doodleStrokeWidth,
-                  points: [{ x: locationX, y: locationY }],
-                };
-                setCurrentDoodlePath(newPath);
-              }}
-              onResponderMove={(evt) => {
-                const { locationX, locationY } = evt.nativeEvent;
-                if (!currentDoodlePath) return;
-                const updatedPoints = [...currentDoodlePath.points, { x: locationX, y: locationY }];
-                setCurrentDoodlePath({ ...currentDoodlePath, points: updatedPoints });
-              }}
-              onResponderRelease={() => {
-                if (currentDoodlePath) {
-                  setDoodlePaths((prev) => [...prev, currentDoodlePath]);
-                  setCurrentDoodlePath(null);
-                }
-              }}
-            >
-              <Svg style={{ width: '100%', height: '100%' }}>
-                {doodlePaths.map((p, idx) => {
-                  if (!p.points || p.points.length < 2) return null;
-                  const d = 'M ' + p.points.map((pt) => `${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(' L ');
-                  return (
-                    <SvgPath
-                      key={idx}
-                      d={d}
-                      stroke={p.color}
-                      strokeWidth={p.width}
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  );
-                })}
-                {currentDoodlePath && currentDoodlePath.points.length > 1 ? (
-                  <SvgPath
-                    d={'M ' + currentDoodlePath.points.map((pt) => `${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(' L ')}
-                    stroke={currentDoodlePath.color}
-                    strokeWidth={currentDoodlePath.width}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                ) : null}
-              </Svg>
-            </View>
-
-            {/* Footer Buttons: Undo, Clear, Save */}
-            <Row style={{ paddingHorizontal: 16, paddingVertical: 12, justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: theme.border || '#333' }}>
-              <Row style={{ gap: 12 }}>
-                <TouchableOpacity
-                  onPress={() => setDoodlePaths((prev) => prev.slice(0, -1))}
-                  disabled={doodlePaths.length === 0}
-                  style={{ opacity: doodlePaths.length > 0 ? 1 : 0.4 }}
-                >
-                  <Ionicons name="arrow-undo" size={22} color={theme.text} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setDoodlePaths([])}
-                  disabled={doodlePaths.length === 0}
-                  style={{ opacity: doodlePaths.length > 0 ? 1 : 0.4 }}
-                >
-                  <Ionicons name="trash-outline" size={22} color="#ff6c61" />
-                </TouchableOpacity>
-              </Row>
-              <Row style={{ gap: 10 }}>
-                <TouchableOpacity
-                  onPress={() => setDoodleModalVisible(false)}
-                  style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: theme.dark ? '#333' : '#e5e7eb' }}
-                >
-                  <AppText size={14}>Cancel</AppText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleDoodleSave}
-                  style={{ paddingHorizontal: 18, paddingVertical: 8, borderRadius: 16, backgroundColor: theme.link }}
-                >
-                  <AppText bold size={14} style={{ color: '#fff' }}>Apply</AppText>
-                </TouchableOpacity>
-              </Row>
-            </Row>
-          </View>
-        </View>
-      </Modal>
+      {doodleEditor ? (
+        <DoodleEditor
+          existing={(doodleEditor.message && doodleEditor.message.doodle) || null}
+          msgRect={doodleEditor.rect}
+          onCancel={() => setDoodleEditor(null)}
+          onApply={handleDoodleApply}
+          onDelete={handleDoodleDelete}
+        />
+      ) : null}
     </Screen>
   );
 }
