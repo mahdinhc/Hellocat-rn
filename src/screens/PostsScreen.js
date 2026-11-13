@@ -1,31 +1,57 @@
-import React, { useState, useMemo } from 'react';
-import { TouchableOpacity, View } from 'react-native';
+import React, { useState, useMemo, useEffect } from 'react';
+import { TouchableOpacity, View, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
-import { Screen } from '../components/ui';
+import { Screen, AppText } from '../components/ui';
 import PostFeed, { Chips } from './PostFeed';
+import { SearchBar, CatIcon } from './CatWidgets';
+import * as PostsDB from '../services/posts';
+
+function CatsStrip({ navigation }) {
+  const { theme } = useTheme();
+  const [cats, setCats] = useState([]);
+  useEffect(() => navigation.addListener('focus', () => { PostsDB.myCats().then(setCats).catch(() => {}); }), [navigation]);
+  const Item = ({ onPress, children, label }) => (
+    <TouchableOpacity onPress={onPress} style={{ alignItems: 'center', width: 68, marginRight: 6 }}>
+      {children}
+      <AppText size={11} numberOfLines={1} style={{ marginTop: 4, color: theme.text }}>{label}</AppText>
+    </TouchableOpacity>
+  );
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+      <Item label="Explore" onPress={() => navigation.navigate('Cats')}>
+        <View style={{ width: 48, height: 48, borderRadius: 14, borderWidth: 1.5, borderStyle: 'dashed', borderColor: theme.link, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="compass-outline" size={24} color={theme.link} /></View>
+      </Item>
+      <Item label="Saved" onPress={() => navigation.navigate('Saved')}>
+        <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: theme.cardBg, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="bookmark" size={22} color={theme.link} /></View>
+      </Item>
+      {cats.map((c) => (
+        <Item key={c.slug} label={c.title || c.slug} onPress={() => navigation.navigate('Cat', { slug: c.slug })}><CatIcon cat={c} size={48} /></Item>
+      ))}
+    </ScrollView>
+  );
+}
 
 export default function PostsScreen({ navigation }) {
   const { theme } = useTheme();
   const [mode, setMode] = useState('all');
   const [sort, setSort] = useState('new');
+  const [search, setSearch] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const src = useMemo(() => ({ mode, sort }), [mode, sort]);
 
   const header = (
     <View>
+      <SearchBar value={search} onChangeText={setSearch} placeholder="Search posts" />
+      <CatsStrip navigation={navigation} />
       <Chips options={[['all', 'All'], ['mine', 'My cats']]} value={mode} onChange={setMode} />
       {mode === 'all' ? <Chips options={[['new', 'New'], ['top', 'Top']]} value={sort} onChange={setSort} /> : null}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 12, paddingBottom: 6 }}>
-        <TouchableOpacity onPress={() => navigation.navigate('Cats')} style={{ marginRight: 18 }}><Ionicons name="paw-outline" size={22} color={theme.link} /></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('Saved')}><Ionicons name="bookmark-outline" size={22} color={theme.link} /></TouchableOpacity>
-      </View>
     </View>
   );
 
   return (
     <Screen style={{ backgroundColor: theme.feedBg }}>
-      <PostFeed src={src} navigation={navigation} header={header} reloadKey={reloadKey} emptyText={mode === 'mine' ? 'Join a cat to see its posts here.' : 'No posts yet. Be the first to write one!'} />
+      <PostFeed src={src} navigation={navigation} header={header} filter={search} reloadKey={reloadKey} emptyText={mode === 'mine' ? 'Join a cat to see its posts here.' : 'No posts yet. Be the first to write one!'} />
       <TouchableOpacity
         onPress={() => navigation.navigate('CreatePost', { onDone: () => setReloadKey((k) => k + 1) })}
         style={{ position: 'absolute', right: 18, bottom: 22, width: 56, height: 56, borderRadius: 28, backgroundColor: theme.buttonBg, alignItems: 'center', justifyContent: 'center', elevation: 5 }}
@@ -38,10 +64,11 @@ export default function PostsScreen({ navigation }) {
 
 export function SavedScreen({ navigation }) {
   const { theme } = useTheme();
+  const [search, setSearch] = useState('');
   const src = useMemo(() => ({ mode: 'saved' }), []);
   return (
     <Screen style={{ backgroundColor: theme.feedBg }}>
-      <PostFeed src={src} navigation={navigation} emptyText="Nothing saved yet." bottomPad={30} />
+      <PostFeed src={src} navigation={navigation} header={<SearchBar value={search} onChangeText={setSearch} placeholder="Search saved posts" />} filter={search} emptyText="Nothing saved yet." bottomPad={30} />
     </Screen>
   );
 }

@@ -9,7 +9,7 @@ import { cachePosts, getCachedPosts } from '../services/offlineStorage';
 const PAGE = 10;
 
 // Paged feed over PostsDB.page(src). Pass a new `src` object (memoized) to reload.
-export default function PostFeed({ src, navigation, header, emptyText = 'No posts yet.', showAuthor = true, bottomPad = 90, reloadKey = 0 }) {
+export default function PostFeed({ src, navigation, header, emptyText = 'No posts yet.', showAuthor = true, bottomPad = 90, reloadKey = 0, filter = '' }) {
   const { theme } = useTheme();
   const [items, setItems] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -61,9 +61,21 @@ export default function PostFeed({ src, navigation, header, emptyText = 'No post
   const refresh = async () => { setRefreshing(true); cursor.current = null; done.current = false; await load(true); setRefreshing(false); };
   const more = async () => { if (done.current || loadingMore || busy.current) return; setLoadingMore(true); await load(false); setLoadingMore(false); };
 
+  const q = filter.trim().toLowerCase();
+  const shown = q ? (items || []).filter((it) => String(it.data.caption || '').toLowerCase().includes(q) || String(it.data.cat || '').includes(q)) : (items || []);
+
+  // while searching, keep pulling pages (bounded) so matches beyond the first page show up
+  const pulls = useRef(0);
+  useEffect(() => { pulls.current = 0; }, [q, src]);
+  useEffect(() => {
+    if (!q || !items || busy.current || done.current || pulls.current >= 8) return;
+    pulls.current += 1;
+    load(false);
+  }, [q, items, load]);
+
   return (
     <FlatList
-      data={items || []}
+      data={shown}
       keyExtractor={(it) => it.id}
       ListHeaderComponent={header}
       renderItem={({ item }) => (
@@ -72,7 +84,7 @@ export default function PostFeed({ src, navigation, header, emptyText = 'No post
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.link} />}
       onEndReached={more}
       onEndReachedThreshold={0.5}
-      ListEmptyComponent={items ? <Empty text={emptyText} /> : <ActivityIndicator color={theme.link} style={{ margin: 30 }} />}
+      ListEmptyComponent={items ? <Empty text={q ? 'No posts match your search.' : emptyText} /> : <ActivityIndicator color={theme.link} style={{ margin: 30 }} />}
       ListFooterComponent={loadingMore ? <ActivityIndicator color={theme.link} style={{ margin: 16 }} /> : null}
       contentContainerStyle={{ paddingVertical: 6, paddingBottom: bottomPad }}
     />
@@ -82,10 +94,10 @@ export default function PostFeed({ src, navigation, header, emptyText = 'No post
 export function Chips({ options, value, onChange }) {
   const { theme } = useTheme();
   return (
-    <View style={{ flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 8 }}>
+    <View style={{ flexDirection: 'row', marginHorizontal: 12, marginVertical: 8, padding: 3, borderRadius: 20, backgroundColor: theme.dark ? '#ffffff12' : '#0000000d' }}>
       {options.map(([v, label]) => (
-        <TouchableOpacity key={v} onPress={() => onChange(v)} style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 18, marginRight: 8, backgroundColor: value === v ? theme.buttonBg : theme.inputBg }}>
-          <AppText size={13} style={{ color: value === v ? theme.buttonText : theme.inputText }}>{label}</AppText>
+        <TouchableOpacity key={v} onPress={() => onChange(v)} style={{ flex: 1, paddingVertical: 7, borderRadius: 17, alignItems: 'center', backgroundColor: value === v ? theme.buttonBg : 'transparent' }}>
+          <AppText size={13} bold={value === v} style={{ color: value === v ? theme.buttonText : theme.text }}>{label}</AppText>
         </TouchableOpacity>
       ))}
     </View>
