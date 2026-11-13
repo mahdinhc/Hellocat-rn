@@ -3,8 +3,8 @@ import { TouchableOpacity, View, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText } from '../components/ui';
-import PostFeed, { Chips } from './PostFeed';
-import { SearchBar, CatIcon } from './CatWidgets';
+import PostFeed from './PostFeed';
+import { SearchBar, CatIcon, SortMenu } from './CatWidgets';
 import * as PostsDB from '../services/posts';
 
 function CatsStrip({ navigation }) {
@@ -34,24 +34,24 @@ function CatsStrip({ navigation }) {
 
 export default function PostsScreen({ navigation }) {
   const { theme } = useTheme();
-  const [mode, setMode] = useState('all');
   const [sort, setSort] = useState('new');
   const [search, setSearch] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const src = useMemo(() => ({ mode, sort }), [mode, sort]);
+  const src = useMemo(() => ({ mode: 'all', sort }), [sort]);
 
   const header = (
     <View>
-      <SearchBar value={search} onChangeText={setSearch} placeholder="Search posts" />
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <SearchBar value={search} onChangeText={setSearch} placeholder="Search posts" style={{ flex: 1, marginRight: 8 }} />
+        <SortMenu value={sort} onChange={setSort} />
+      </View>
       <CatsStrip navigation={navigation} />
-      <Chips options={[['all', 'All'], ['mine', 'My cats']]} value={mode} onChange={setMode} />
-      {mode === 'all' ? <Chips options={[['new', 'New'], ['top', 'Top']]} value={sort} onChange={setSort} /> : null}
     </View>
   );
 
   return (
     <Screen style={{ backgroundColor: theme.feedBg }}>
-      <PostFeed src={src} navigation={navigation} header={header} filter={search} reloadKey={reloadKey} emptyText={mode === 'mine' ? 'Join a cat to see its posts here.' : 'No posts yet. Be the first to write one!'} />
+      <PostFeed src={src} navigation={navigation} header={header} filter={search} reloadKey={reloadKey} emptyText="No posts yet. Be the first to write one!" />
       <TouchableOpacity
         onPress={() => navigation.navigate('CreatePost', { onDone: () => setReloadKey((k) => k + 1) })}
         style={{ position: 'absolute', right: 18, bottom: 22, width: 56, height: 56, borderRadius: 28, backgroundColor: theme.buttonBg, alignItems: 'center', justifyContent: 'center', elevation: 5 }}

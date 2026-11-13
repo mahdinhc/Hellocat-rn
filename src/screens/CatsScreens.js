@@ -6,9 +6,9 @@ import { useTheme } from '../theme/ThemeContext';
 import { Screen, AppText, Row, Button, Loading, Empty } from '../components/ui';
 import { formatNumber } from '../utils';
 import * as PostsDB from '../services/posts';
-import PostFeed, { Chips } from './PostFeed';
+import PostFeed from './PostFeed';
 import { RichText } from './PostComponents';
-import { CatIcon, CatBanner, SearchBar } from './CatWidgets';
+import { CatIcon, CatBanner, SearchBar, SortMenu } from './CatWidgets';
 
 export function CatsScreen({ navigation }) {
   const { theme } = useTheme();
@@ -108,8 +108,10 @@ export function CatScreen({ route, navigation }) {
           {banned ? <AppText size={12} style={{ color: '#e5484d', marginTop: 8 }}>You are banned from this cat.</AppText> : null}
         </View>
       </View>
-      <SearchBar value={search} onChangeText={setSearch} placeholder={`Search in cat/${slug}`} />
-      <Chips options={[['new', 'New'], ['top', 'Top']]} value={sort} onChange={setSort} />
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <SearchBar value={search} onChangeText={setSearch} placeholder={`Search in cat/${slug}`} style={{ flex: 1, marginRight: 8 }} />
+        <SortMenu value={sort} onChange={setSort} />
+      </View>
     </View>
   );
 
