@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { FlatList, View, Alert, TouchableOpacity, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, query, where, getDocs } from 'firebase/firestore';
 import { get as dbGet } from 'firebase/database';
-import { firestore, db, auth } from '../firebase';
+import { db, auth } from '../firebase';
 import { safeRef, safeOnValue, isValidKey, reportError } from '../safe';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../theme/ThemeContext';
@@ -13,7 +12,8 @@ import { renderHellocatString } from '../services/hellocatString';
 import { THEMES } from '../theme/themes';
 import { getRelationType, sendFriendRequest, cancelFriendRequest, acceptFriendRequest, rejectFriendRequest, unfriendUser, isFollowing, follow, unfollow } from '../services/friends';
 import { userDisplayName, formatNumber, timeAgo } from '../utils';
-import { BlogCard } from './BlogComponents';
+import { PostCard } from './PostComponents';
+import * as PostsDB from '../services/posts';
 import ErrorBoundary from '../components/ErrorBoundary';
 
 
@@ -163,17 +163,14 @@ export default function ProfileScreen({ route, navigation }) {
     (async () => {
       if (!uid) return;
       try {
-        const q = own
-          ? query(collection(firestore, 'blogs'), where('uid', '==', uid))
-          : query(collection(firestore, 'blogs'), where('uid', '==', uid), where('visibility', '==', 'public'));
-        const snap = await getDocs(q);
+        let items = [];
+        let cursor = null; let done = false;
+        while (!done && items.length < 50) {
+          const pg = await PostsDB.page({ mode: 'user', uid, sort: 'new' }, cursor, 20);
+          items = items.concat(pg.items.map((i) => ({ ...i.data, id: i.id })));
+          cursor = pg.cursor; done = pg.done;
+        }
         if (!alive) return;
-        const items = (snap && snap.docs ? snap.docs : []).map((d) => ({ id: d.id, ...(d && typeof d.data === 'function' ? d.data() : {}) }));
-        items.sort((a, b) => {
-          const aTs = a && a.server_ts && typeof a.server_ts.toMillis === 'function' ? a.server_ts.toMillis() : (a && typeof a.server_ts === 'number' ? a.server_ts : 0);
-          const bTs = b && b.server_ts && typeof b.server_ts.toMillis === 'function' ? b.server_ts.toMillis() : (b && typeof b.server_ts === 'number' ? b.server_ts : 0);
-          return bTs - aTs;
-        });
         setPosts(items);
       } catch (e) {
         if (alive) {
@@ -216,16 +213,11 @@ export default function ProfileScreen({ route, navigation }) {
     setTotals({ views: null, mojo: null });
     (async () => {
       let V = 0; let L = 0; let C = 0;
-      await Promise.all(posts.map(async (p) => {
-        const r = p && p.id ? safeRef('blogs', p.id) : null;
-        if (!r) return;
-        try {
-          const sn = await dbGet(r);
-          C += sn.child('comments').numChildren();
-          L += sn.child('reacts').numChildren();
-          V += Number(sn.child('views').val()) || 0;
-        } catch (e) { /* ignore one post */ }
-      }));
+      posts.forEach((p) => {
+        V += Number(p.views) || 0;
+        L += (Number(p.like_count) || 0) + Math.max(0, Number(p.score) || 0);
+        C += Number(p.comment_count) || 0;
+      });
       if (!alive) return;
       const mojo = Math.round(V * 2 + L * 150 + C * 300 + (L + C) * V * 0.1);
       setTotals({ views: V, mojo });
@@ -375,7 +367,7 @@ export default function ProfileScreen({ route, navigation }) {
         ListHeaderComponent={renderHeader}
         renderItem={({ item }) => (
           <ErrorBoundary compact name="profile-post">
-            <BlogCard post={item} navigation={navigation} showAuthor={false} />
+            <PostCard post={item} navigation={navigation} showAuthor={false} />
           </ErrorBoundary>
         )}
         ListEmptyComponent={<AppText muted style={{ textAlign: 'center', padding: 20 }}>No posts yet.</AppText>}

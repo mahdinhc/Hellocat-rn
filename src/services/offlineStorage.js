@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CHATS_CACHE_PREFIX = 'hellocat_cache_chats_';
 const MESSAGES_CACHE_PREFIX = 'hellocat_cache_msgs_';
-const BLOGS_CACHE_KEY = 'hellocat_cache_blogs';
+const POSTS_CACHE_KEY = 'hellocat_cache_posts_v2';
 
 // Save user conversation list
 export async function cacheUserChats(uid, chats) {
@@ -47,20 +47,20 @@ export async function getCachedChatMessages(cid) {
   }
 }
 
-// Save blog posts
-export async function cacheBlogPosts(posts) {
+// Save feed posts
+export async function cachePosts(posts) {
   if (!Array.isArray(posts)) return;
   try {
-    await AsyncStorage.setItem(BLOGS_CACHE_KEY, JSON.stringify(posts.slice(0, 50)));
+    await AsyncStorage.setItem(POSTS_CACHE_KEY, JSON.stringify(posts.slice(0, 50)));
   } catch (e) {
     // ignore
   }
 }
 
-// Get cached blog posts
-export async function getCachedBlogPosts() {
+// Get cached feed posts
+export async function getCachedPosts() {
   try {
-    const raw = await AsyncStorage.getItem(BLOGS_CACHE_KEY);
+    const raw = await AsyncStorage.getItem(POSTS_CACHE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null;

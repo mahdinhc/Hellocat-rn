@@ -571,7 +571,7 @@ export function SettingsStorageScreen() {
       <ScrollView>
         <AppText style={{ fontSize: 18, fontWeight: '700', marginBottom: 6 }}>Storage Provider</AppText>
         <AppText size={13} muted style={{ marginBottom: 18 }}>
-          Choose where chat files, attachments, blog media, and profile pictures are uploaded.
+          Choose where chat files, attachments, post media, and profile pictures are uploaded.
         </AppText>
 
         <Option

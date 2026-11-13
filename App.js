@@ -22,8 +22,9 @@ import { SignInScreen, SignUpScreen, VerifyEmailScreen, CreateProfileScreen } fr
 import ChatsScreen from './src/screens/ChatsScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import FriendsScreen from './src/screens/FriendsScreen';
-import BlogsScreen from './src/screens/BlogsScreen';
-import BlogViewScreen from './src/screens/BlogViewScreen';
+import PostsScreen, { SavedScreen } from './src/screens/PostsScreen';
+import PostViewScreen from './src/screens/PostViewScreen';
+import { CatsScreen, CatScreen } from './src/screens/CatsScreens';
 import CreatePostScreen from './src/screens/CreatePostScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { SettingsScreen, SettingsProfileScreen, SettingsAccountScreen, SettingsThemeScreen, SettingsHistoryScreen, SettingsNotificationsScreen, SettingsDeveloperScreen, SettingsStorageScreen } from './src/screens/SettingsScreens';
@@ -87,7 +88,7 @@ function Tabs() {
       })}
     >
       <Tab.Screen name="Chats" component={ChatsScreen} options={{ title: 'Hellocat' }} />
-      <Tab.Screen name="Posts" component={BlogsScreen} />
+      <Tab.Screen name="Posts" component={PostsScreen} />
       <Tab.Screen name="Friends" component={FriendsScreen} options={{ tabBarBadge: reqs > 0 ? reqs : undefined }} />
       <Tab.Screen name="Me" component={ProfileScreen} options={{ title: 'My profile' }} />
     </Tab.Navigator>
@@ -106,7 +107,10 @@ function MainStack() {
         options={{ headerStyle: { backgroundColor: theme.chatHeadBg }, headerTintColor: theme.chatHeadText, title: '' }}
       />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
-      <Stack.Screen name="BlogView" component={BlogViewScreen} options={{ title: 'Post' }} />
+      <Stack.Screen name="PostView" component={PostViewScreen} options={{ title: 'Post' }} />
+      <Stack.Screen name="Cats" component={CatsScreen} options={{ title: 'Cats' }} />
+      <Stack.Screen name="Cat" component={CatScreen} options={{ title: 'Cat' }} />
+      <Stack.Screen name="Saved" component={SavedScreen} options={{ title: 'Saved posts' }} />
       <Stack.Screen name="CreatePost" component={CreatePostScreen} options={{ title: 'New post' }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
       <Stack.Screen name="SettingsProfile" component={SettingsProfileScreen} options={{ title: 'Edit profile' }} />
