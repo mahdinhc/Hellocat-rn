@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { View, Image, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import Svg, { Path as SvgPath, SvgXml } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ const BRUSHES = ['Normal', 'Neon', 'Soft'];
 const SVG_PREFIX = 'data:image/svg+xml';
 
 const f1 = (n) => Math.round(n * 10) / 10;
+const EMPTY_D = 'M0 0';
 
 // Smooth path through the points (quadratic curves through midpoints) => no jagged lines
 function pathD(pts) {
@@ -122,7 +123,7 @@ export default function DoodleEditor({ existing, msgRect, onCancel, onApply, onD
   const [opacity, setOpacity] = useState(1);
   const [brush, setBrush] = useState('Normal');
   const [eraser, setEraser] = useState(false);
-  const [liveD, setLiveD] = useState('');
+  const liveRef = useRef(null); // live stroke is updated natively, without React re-rendering
   const live = useRef({ pts: [], active: false, raf: null });
   const cfg = useRef({});
   cfg.current = { color, width, opacity, brush, eraser };
@@ -168,7 +169,7 @@ export default function DoodleEditor({ existing, msgRect, onCancel, onApply, onD
     if (live.current.raf) return;
     live.current.raf = requestAnimationFrame(() => {
       live.current.raf = null;
-      setLiveD(pathD(live.current.pts));
+      if (liveRef.current) liveRef.current.setNativeProps({ d: pathD(live.current.pts) });
     });
   };
 
@@ -197,8 +198,15 @@ export default function DoodleEditor({ existing, msgRect, onCancel, onApply, onD
       const c = cfg.current;
       setStrokes((prev) => [...prev, { pts, color: c.color, width: c.width, opacity: c.opacity, brush: c.brush, eraser: c.eraser }]);
     }
-    setLiveD('');
   };
+
+  // clear the live stroke only after the committed layer has re-rendered (no flicker)
+  useEffect(() => {
+    const t = requestAnimationFrame(() => {
+      if (!live.current.active && liveRef.current) liveRef.current.setNativeProps({ d: EMPTY_D });
+    });
+    return () => cancelAnimationFrame(t);
+  }, [strokes]);
 
   const apply = () => {
     if (!strokes.length) { onCancel && onCancel(); return; }
@@ -240,17 +248,16 @@ export default function DoodleEditor({ existing, msgRect, onCancel, onApply, onD
         ) : null}
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
           <Svg width={box.w} height={box.h}>
-            {liveD ? (
-              <SvgPath
-                d={liveD}
-                stroke={eraser ? 'rgba(255,255,255,0.6)' : color}
-                strokeWidth={width}
-                strokeOpacity={eraser ? 1 : opacity}
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            ) : null}
+            <SvgPath
+              ref={liveRef}
+              d={EMPTY_D}
+              stroke={eraser ? 'rgba(255,255,255,0.6)' : color}
+              strokeWidth={width}
+              strokeOpacity={eraser ? 1 : opacity}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </Svg>
         </View>
       </View>
